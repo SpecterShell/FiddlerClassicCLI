@@ -1,0 +1,37 @@
+# Build and test output
+bin/
+obj/
+artifacts/
+TestResults/
+coverage/
+*.trx
+*.coverage
+*.coveragexml
+
+# IDE state
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Local capture evidence
+*.saz
+*.har
+*.network-request
+*.network-response
+
+# Local secrets and transient files
+.env
+.env.*
+!.env.example
+*.log
+*.tmp
+*.bak
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini

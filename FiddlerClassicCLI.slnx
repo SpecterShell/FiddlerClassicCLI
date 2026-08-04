@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="src/FiddlerClassic.Protocol/FiddlerClassic.Protocol.csproj" />
+  <Project Path="src/FiddlerClassic.Bridge/FiddlerClassic.Bridge.csproj" />
+  <Project Path="src/FiddlerClassic.Host/FiddlerClassic.Host.csproj" />
+  <Project Path="tests/FiddlerClassic.Tests/FiddlerClassic.Tests.csproj" />
+  <Project Path="tests/FiddlerClassic.Bridge.Tests/FiddlerClassic.Bridge.Tests.csproj" />
+</Solution>

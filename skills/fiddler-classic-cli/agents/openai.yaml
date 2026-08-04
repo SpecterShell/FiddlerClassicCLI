@@ -1,0 +1,4 @@
+interface:
+  display_name: "Fiddler Classic CLI"
+  short_description: "Inspect and control Fiddler Classic traffic"
+  default_prompt: "Use $fiddler-classic-cli to inspect the latest captured network requests."

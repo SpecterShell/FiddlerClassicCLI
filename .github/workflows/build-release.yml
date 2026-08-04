@@ -1,0 +1,119 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+  FIDDLER_CLASSIC_VERSION: "5.0.20262.6151"
+
+jobs:
+  build:
+    name: Build, test, and package
+    runs-on: windows-2025
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          global-json-file: global.json
+
+      - name: Install Fiddler Classic compile reference
+        shell: pwsh
+        run: ./scripts/install-fiddler-ci.ps1 -Version $env:FIDDLER_CLASSIC_VERSION
+
+      - name: Build release package
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+              if ($env:GITHUB_REF_NAME -notmatch '^v(?<version>[0-9]+(?:\.[0-9]+){2}(?:[-.][0-9A-Za-z]+)*)$') {
+                  throw "Release tags must use v<major>.<minor>.<patch> with an optional prerelease suffix."
+              }
+
+              ./scripts/package.ps1 -Version $matches.version
+          }
+          else {
+              ./scripts/package.ps1
+          }
+
+      - name: Upload release package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: fiddler-classic-release
+          path: |
+            artifacts/release/fiddler-classic-win-x64.zip
+            artifacts/release/SHA256SUMS
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  release:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out release scripts
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Download tested release package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: fiddler-classic-release
+          path: artifacts/release
+
+      - name: Verify downloaded release package
+        shell: pwsh
+        run: ./scripts/verify-release.ps1
+
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $arguments = @(
+              "release",
+              "create",
+              $env:GITHUB_REF_NAME,
+              "artifacts/release/fiddler-classic-win-x64.zip",
+              "artifacts/release/SHA256SUMS",
+              "--verify-tag",
+              "--generate-notes",
+              "--title",
+              $env:GITHUB_REF_NAME
+          )
+
+          if ($env:GITHUB_REF_NAME.Contains("-")) {
+              $arguments += "--prerelease"
+          }
+
+          & gh @arguments
+          if ($LASTEXITCODE -ne 0) {
+              throw "GitHub release creation failed with exit code $LASTEXITCODE."
+          }

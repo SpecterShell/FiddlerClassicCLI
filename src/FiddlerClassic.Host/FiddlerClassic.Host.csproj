@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>fiddler-classic</AssemblyName>
+    <RootNamespace>FiddlerClassic.Host</RootNamespace>
+    <Version>0.3.0-preview.1</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../FiddlerClassic.Protocol/FiddlerClassic.Protocol.csproj" />
+    <PackageReference Include="System.CommandLine" />
+    <PackageReference Include="ModelContextProtocol" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="../../README.md" Link="README.md" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="../../README.zh-CN.md" Link="README.zh-CN.md" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="../../LICENSE" Link="LICENSE" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="../../PLAN.md" Link="PLAN.md" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="../../SECURITY.md" Link="SECURITY.md" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="../../SECURITY.zh-CN.md" Link="SECURITY.zh-CN.md" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="../../skills/fiddler-classic-cli/scripts/install.ps1" Link="install.ps1" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="../../docs/**/*.md" Link="docs/%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="../../skills/**/*" Link="skills/%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="BuildBridgeForPublish" BeforeTargets="Publish">
+    <MSBuild Projects="../FiddlerClassic.Bridge/FiddlerClassic.Bridge.csproj" Targets="Build" Properties="Configuration=$(Configuration)" />
+  </Target>
+  <Target Name="CopyBridgeForPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <BridgeFiles Include="../FiddlerClassic.Bridge/bin/$(Configuration)/net462/FiddlerClassic.Bridge.dll" />
+      <BridgeFiles Include="../FiddlerClassic.Protocol/bin/$(Configuration)/net462/FiddlerClassic.Protocol.dll" />
+    </ItemGroup>
+    <MakeDir Directories="$(PublishDir)bridge" />
+    <Copy SourceFiles="@(BridgeFiles)" DestinationFolder="$(PublishDir)bridge" />
+  </Target>
+</Project>

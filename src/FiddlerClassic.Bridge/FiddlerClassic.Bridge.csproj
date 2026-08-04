@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net462</TargetFramework>
+    <AssemblyName>FiddlerClassic.Bridge</AssemblyName>
+    <RootNamespace>FiddlerClassic.Bridge</RootNamespace>
+    <Version>0.1.1</Version>
+    <NoWarn>$(NoWarn);MSB3277</NoWarn>
+    <FiddlerInstallDir Condition="'$(FiddlerInstallDir)' == ''">$(LOCALAPPDATA)\Programs\Fiddler</FiddlerInstallDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../FiddlerClassic.Protocol/FiddlerClassic.Protocol.csproj" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" PrivateAssets="all" />
+    <Reference Include="Fiddler">
+      <HintPath>$(FiddlerInstallDir)\Fiddler.exe</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="System.Web.Extensions" />
+    <Reference Include="System.Windows.Forms" />
+  </ItemGroup>
+  <Target Name="VerifyFiddlerReference" BeforeTargets="ResolveReferences" Condition="!Exists('$(FiddlerInstallDir)\Fiddler.exe')">
+    <Error Text="Fiddler Classic 5.x was not found at '$(FiddlerInstallDir)'. Set FiddlerInstallDir to the directory containing Fiddler.exe." />
+  </Target>
+</Project>
