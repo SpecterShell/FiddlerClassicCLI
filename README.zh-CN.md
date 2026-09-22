@@ -2,20 +2,20 @@
 
 [English (en-US)](README.md) | **简体中文 (zh-CN)**
 
-这是一个非官方、仅支持 Windows 的 Fiddler Classic 5.x CLI 与 MCP 集成。它继续使用 Fiddler Classic 作为抓包引擎，并通过轻量级进程内扩展、当前用户专用的命名管道和统一的 .NET 主程序提供脚本化访问。
+Fiddler Classic CLI 为 Fiddler Classic 5.x 和 6.x 提供非官方的 CLI 与 MCP 集成，仅支持 Windows。它通过轻量级进程内扩展、当前用户专用的命名管道和共享的 .NET 主程序提供脚本化访问，抓包仍由 Fiddler Classic 负责。
 
-本项目与 Progress Telerik 没有关联，也不受其官方支持。项目遵循 Fiddler Classic 已公开的 [.NET 扩展接口](https://www.telerik.com/fiddler/fiddler-classic/documentation/extend-fiddler/interfaces)，并采用已发布 [Fiddler 插件](https://www.telerik.com/fiddler/add-ons)使用的部署约定。
+本项目与 Progress Telerik 没有关联，也不受其官方支持。项目使用 Fiddler Classic 文档中的 [.NET 扩展接口](https://www.telerik.com/fiddler/fiddler-classic/documentation/extend-fiddler/interfaces)，并遵循已发布 [Fiddler 插件](https://www.telerik.com/fiddler/add-ons)的部署约定。
 
-每项公开能力都标记为原生、原生适配、自定义、混合或主程序功能。完整矩阵和一致性约定见[功能类型与原生兼容性](docs/zh-CN/feature-types.md)。
+每项公开功能都归类为原生、原生适配、自定义、混合或主程序功能。完整分类表及与 Fiddler 原生行为保持一致的要求见[功能类型与原生兼容性](docs/zh-CN/feature-types.md)。
 
 ## 系统要求
 
 - Windows x64
-- Fiddler Classic 5.x
+- Fiddler Classic 5.x 或 6.x
 - 执行抓包和会话操作时，Fiddler 必须正在运行
-- 仅从源码构建时需要 .NET SDK 10；发布版本已自包含运行时
+- 仅从源码构建时需要 .NET SDK 10；发布版本已包含运行时
 
-桥接项目会引用本机安装的 `Fiddler.exe`，但不会将该文件复制到项目或发布产物中。
+桥接项目在构建时引用本机安装的 `Fiddler.exe`，该文件不会提交到仓库或包含在发布包中。
 
 ## 安装
 
@@ -28,7 +28,7 @@
 fiddler-classic --version
 ```
 
-安装脚本会将自包含程序复制到 `%LOCALAPPDATA%\Programs\FiddlerClassicCLI\<版本>`，并更新当前用户的 `PATH`。它也可以为 Agent 工作流安装本地发布 ZIP，或从可信 GitHub 仓库下载并校验发布版本。本地包用法和私有仓库认证方式详见[安装指南](docs/zh-CN/installation.md)。
+安装脚本会将自包含程序复制到 `%LOCALAPPDATA%\Programs\FiddlerClassicCLI\<版本>`，并更新当前用户的 `PATH`。Agent 工作流也可用它安装本地发布 ZIP，或从可信 GitHub 仓库下载发布版本并校验。本地包用法和私有仓库认证方式见[安装指南](docs/zh-CN/installation.md)。
 
 安装 Fiddler 扩展、重启 Fiddler Classic，然后验证连接：
 
@@ -40,13 +40,13 @@ fiddler-classic status
 
 ### 从源码构建
 
-从源码构建、测试并发布：
+运行构建脚本，完成源码构建、测试和发布：
 
 ```powershell
 ./scripts/build.ps1
 ```
 
-自包含发布目录为 `artifacts/publish/win-x64`。可使用以下命令将其安装到当前用户：
+脚本将自包含发布文件写入 `artifacts/publish/win-x64`。使用以下命令为当前用户安装：
 
 ```powershell
 ./artifacts/publish/win-x64/install.ps1
@@ -57,15 +57,16 @@ fiddler-classic status
 - `FiddlerClassic.Bridge.dll`
 - `FiddlerClassic.Protocol.dll`
 
-使用 `bridge uninstall` 删除它们。卸载时会在交互式终端中要求确认；当 stdin 被重定向时必须传递 `--yes`。
+该命令还会在 `%LOCALAPPDATA%\FiddlerClassicCLI\bridge-host.json` 中记录已安装主程序的可执行文件和版本。重启 Fiddler 后，可通过 **Fiddler Classic CLI** 标签页或 Tools 菜单中的快捷入口管理 MCP HTTP 访问。使用 `bridge uninstall` 删除扩展文件和启动记录。卸载命令会在交互式终端中要求确认；stdin 被重定向时必须传递 `--yes`。
 
 ## CLI
 
 ```text
 fiddler-classic doctor
 fiddler-classic status [--json]
+fiddler-classic app detect|open|close|restart
 fiddler-classic capture start|stop
-fiddler-classic sessions list [过滤参数]
+fiddler-classic sessions list [过滤参数] [--summary]
 fiddler-classic sessions watch [过滤参数] [--after-id ID] [--timeout 秒] [--count N] [--jsonl]
 fiddler-classic sessions show <session-id>
 fiddler-classic sessions body <session-id> --direction request|response --output <路径|->
@@ -84,20 +85,27 @@ fiddler-classic breakpoints status|arms|arm|disarm|list|wait|show|update|resume|
 fiddler-classic bridge install|uninstall
 fiddler-classic daemon start|status|stop
 fiddler-classic mcp stdio|http
+fiddler-classic mcp service status|configure|enable|disable
+fiddler-classic mcp clients list|authorize|deauthorize
+fiddler-classic mcp connections list|disconnect
 fiddler-classic config token show|rotate
 ```
 
-依赖桥接的 CLI 命令会自动启动持久后台守护进程，并通过仅限当前用户访问的 Windows 命名管道与其通信。后续 CLI 调用会复用同一个进程。可使用 `daemon start`、`daemon status` 和 `daemon stop` 显式管理；详见 [CLI 指南](docs/zh-CN/cli.md)。
+用 `app detect` 查找已有的 Fiddler 安装和进程。`app open` 使用 `-noattach` 启动 Fiddler，已有实例则保持不变。`app close` 和 `app restart` 需要确认（脚本需传入 `--yes`），执行前请保存需要的捕获记录。命令请求正常关闭，不会强制终止 Fiddler。自定义路径、PID 选择和超时说明见[应用程序命令](docs/zh-CN/cli.md#fiddler-应用程序)。
 
-`sessions list`、`sessions watch` 和 HAR 导出共享过滤参数，可按 ID、方法、主机、URL、状态码、响应 MIME 类型、进程、请求头名称和值、耗时、HTTP 协议、正文总大小、错误状态，以及请求或响应正文内容筛选。正文搜索必须显式启用，按 UTF-8 字节精确匹配，默认检查每个会话前 64 KiB，最大为 1 MiB。列表默认返回 100 个会话，最多 1,000 个。
+需要桥接的 CLI 命令会自动启动持续运行的后台守护进程，并通过仅限当前用户访问的 Windows 命名管道与其通信。安装后的扩展也会在 Fiddler 加载时启动或发现该守护进程，后续客户端复用同一个进程。可使用 `daemon start`、`daemon status` 和 `daemon stop` 显式管理守护进程，详见 [CLI 指南](docs/zh-CN/cli.md)。
 
-`sessions show` 返回元数据和保持原始顺序的请求头名称/值，不返回正文。`sessions body` 以 256 KiB 分块流式输出完整原始载荷。输出到 `-` 时，stdout 只用于正文数据，状态和错误写入 stderr。
+`sessions list`、`sessions watch` 和 HAR 导出共用过滤参数，可按 ID、方法、主机、URL、状态码、响应 MIME 类型、进程、标头名称和值、耗时、HTTP 协议、正文总大小、错误状态，以及请求或响应正文内容筛选。正文搜索必须显式启用，按 UTF-8 字节精确匹配。默认检查每个会话的前 64 KiB，最多检查 1 MiB。列表默认返回 100 个会话，最多 1,000 个。
 
-`sessions watch` 会在会话完成时持续输出。`sessions replay --wait` 和 `request send --wait` 会从操作前的基准 ID 开始等待首个匹配的已完成会话。`sessions remove` 只删除显式指定的 ID。导出和比较结果会保留敏感证据：cURL 与原始 HTTP 用于复现单个请求，HAR 用于导出过滤后的集合，diff 比较元数据、原始请求头、耗时和正文哈希。WebSocket 帧元数据与载荷分离，载荷以分块方式读取。
+`sessions show` 返回元数据和原始标头名称/值，保留原始顺序，不返回正文。`sessions body` 以 256 KiB 分块流式输出完整原始载荷。输出到 `-` 时，stdout 只包含正文字节，状态信息和错误写入 stderr。
 
-`autoresponder` 控制 Fiddler 当前的 AutoResponder 引擎。规则使用运行时 ID，保留 Fiddler 的求值顺序，并接受原生匹配与操作字符串。FARX 导入会追加规则；`--replace --yes` 会替换整个列表。保存路径必须是绝对 `.farx` 路径，替换现有文件需要 `--overwrite --yes`。
+`sessions watch` 持续输出刚完成的会话。`sessions replay --wait` 和 `request send --wait` 会在操作前的基准 ID 之后等待首个匹配的已完成会话，并将其与操作关联。`sessions remove` 只删除显式指定的 ID。导出和比较结果保留敏感证据：cURL 与原始 HTTP 用于复现单个请求，HAR 用于导出过滤后的集合，diff 比较元数据、原始标头、耗时和正文哈希。WebSocket 载荷与帧元数据分开，以分块方式流式输出。
 
-`breakpoints arm request|response` 可按方法、主机、URL、请求头、进程，以及仅适用于响应的状态码/内容类型条件暂停后续流量。默认创建一次性触发器，传递 `--persistent` 可持续生效。托管断点默认在 30 秒后自动继续，可配置为 1-300 秒。待处理断点可以检查、按阶段修改、继续或显式中止。
+`autoresponder` 控制 Fiddler 正在运行的 AutoResponder 引擎。规则使用运行时 ID，保留 Fiddler 的求值顺序，并接受原生匹配与操作字符串。FARX 导入会追加规则；`--replace --yes` 会替换整个列表。保存时必须使用绝对 `.farx` 路径，替换现有文件需要 `--overwrite --yes`。
+
+`breakpoints arm request|response` 可按方法、主机、URL、标头、进程，以及仅适用于响应的状态码/内容类型条件暂停后续流量。触发器默认为一次性，传递 `--persistent` 后可持续生效。托管暂停默认在 30 秒后自动继续，保持时间可配置为 1-300 秒。待处理断点可以检查、修改当前阶段允许的字段、继续或显式中止。
+
+`sessions list --summary` 按主机和状态码汇总一个有条数上限的元数据页，并提供已捕获的正文字节总数及已完成请求的耗时统计。`doctor --output C:\Temp\fiddler-diagnostics.json` 会创建仅含元数据的诊断报告，不会启动守护进程。统计范围、排除字段和输出规则见 [CLI 指南](docs/zh-CN/cli.md)。
 
 ### 退出码
 
@@ -109,9 +117,11 @@ fiddler-classic config token show|rotate
 | 3 | 未安装 Fiddler |
 | 4 | Fiddler、桥接或 CLI 守护进程不可用 |
 | 5 | 操作被拒绝、目标不存在、发生冲突或缺少确认 |
-| 6 | 桥接或 CLI 守护进程超时 |
+| 6 | 桥接、CLI 守护进程或等待 Fiddler 应用程序退出超时 |
 
 ## MCP
+
+主程序使用官方 C# SDK 2.2.0，通过 stdio 和 Streamable HTTP 支持 MCP 协议版本 `2026-07-28`，同时接受 `2025-11-25` 和 `2025-06-18` 的初始化握手。MCP 协议以日期标识版本，"v2" 是 SDK 的主版本号。请求要求和错误说明见[协议兼容性](docs/zh-CN/cli.md#mcp-协议)。
 
 ### 标准输入输出
 
@@ -136,22 +146,34 @@ stdio 传输只将 JSON-RPC 协议消息写入 stdout，主程序诊断信息写
 ./fiddler-classic.exe mcp http
 ```
 
-默认端点为 `http://127.0.0.1:8877/mcp`。它采用无状态模式，仅绑定回环地址，不启用 CORS，并要求：
+前台服务器采用无状态模式，仅绑定回环地址。两种 HTTP 模式均对包含 `Origin` 标头的请求返回 HTTP 403，不允许浏览器访问，也不启用 CORS。默认端点为 `http://127.0.0.1:8877/mcp`，请求必须携带以下授权头：
 
 ```http
 Authorization: Bearer <token>
 ```
 
-使用 `config token show` 查看生成的令牌，使用 `config token rotate` 替换令牌。配置保存在 `%LOCALAPPDATA%\FiddlerClassicCLI\config.json`，并应用仅限当前用户访问的 ACL。
+使用 `config token show` 查看默认令牌，使用 `config token rotate` 替换令牌。前台和托管 HTTP 监听器都接受默认凭据与命名客户端凭据，并在凭据轮换或撤销后的后续请求中重新加载。守护进程可以运行持续提供服务的托管监听器：
+
+```powershell
+fiddler-classic mcp service configure --bind loopback --port 8877
+fiddler-classic mcp service enable
+fiddler-classic mcp clients authorize --name "Local agent"
+fiddler-classic mcp connections list
+```
+
+命名客户端令牌只显示一次，配置中只保存其 SHA-256 哈希。将托管服务绑定到 `0.0.0.0` 必须明确确认，因为 Bearer 凭据通过明文 HTTP 传输，任何监听到凭据的人都可以重复使用。本项目不会配置 TLS、防火墙规则或 CORS。配置保存在 `%LOCALAPPDATA%\FiddlerClassicCLI\config.json`，由仅允许当前用户访问的 ACL 保护。
+
+管理标签页带有终端图标。面板变窄时按钮会自动换行，刷新时会保留编辑内容和选中项。控件支持键盘操作，回环地址和可用局域网地址提示各有独立的复制按钮。[托管 HTTP 控制](docs/zh-CN/cli.md#托管-mcp-http)说明了如何应用设置和处理超时，并列出地址限制。
 
 ### 检查工具
 
-MCP 接口采用 [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp) 的小型、可组合列表/详情模式，并针对 Fiddler 的进程级会话模型进行了调整。工具工作流和差异说明见[设计文档](docs/zh-CN/design.md)。
+MCP 接口采用可组合的小型列表和详情调用，沿用 [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp) 的模式，并适配 Fiddler 的进程级会话模型。工具工作流和差异说明见[设计文档](docs/zh-CN/design.md)。
 
 - `get_status`
 - `start_capture`
 - `stop_capture`
 - `list_network_requests`
+- `summarize_network_requests`
 - `wait_for_network_request`
 - `get_network_request`
 - `get_network_request_body`
@@ -165,7 +187,7 @@ MCP 接口采用 [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-
 - `list_websocket_messages`
 - `get_websocket_message`
 
-当还有更多匹配项时，`list_network_requests` 会返回稳定的 `nextMaxRequestId` 或 `nextMinRequestId` 续传边界。`wait_for_network_request` 可从排他的请求 ID 之后等待最多 60 秒。请求详情默认不包含请求头，只有 `includeHeaders=true` 时才返回。HTTP 正文和 WebSocket 载荷只能通过对应的限长载荷工具读取，每次 MCP 调用最多 64 KiB，并包含明确的文本或 Base64 编码元数据。清空、选择性删除和替换归档必须传递明确的确认参数。
+还有更多匹配项时，`list_network_requests` 会返回稳定的 `nextMaxRequestId` 或 `nextMinRequestId` 续传边界。`wait_for_network_request` 最多等待 60 秒，只匹配指定请求 ID 之后的请求，不含该 ID。请求详情默认不包含标头，只有 `includeHeaders=true` 时才返回。HTTP 正文和 WebSocket 载荷只能通过对应的限长载荷工具读取，每次 MCP 调用最多返回 64 KiB，并明确提供文本或 Base64 编码元数据。清空、选择性删除和替换归档必须传递明确的确认参数。
 
 ### AutoResponder 工具
 
@@ -180,7 +202,7 @@ MCP 接口采用 [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-
 - `save_autoresponder_rules`
 - `load_autoresponder_rules`
 
-规则修改工具标注为开放世界操作，因为原生 Fiddler 操作可以重定向、生成、延迟、丢弃流量，或从本地文件读取响应。删除、清空、文件替换和完整列表替换使用破坏性注解与明确确认参数。
+规则修改工具带有开放世界注解，因为原生 Fiddler 操作可以重定向、生成、延迟或丢弃流量，也可以从本地文件读取响应。删除、清空、文件替换和完整列表替换带有破坏性注解，并要求明确的确认参数。
 
 ### 断点工具
 
@@ -194,30 +216,27 @@ MCP 接口采用 [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-
 - `resume_network_breakpoint`
 - `abort_network_breakpoint`
 
-断点列表和详情不包含正文。通过 `get_network_request_body` 读取暂停中的载荷；只有确实要替换时，才向 `update_network_breakpoint` 传递完整 Base64 正文。中止操作要求 `confirm=true`。
+断点列表和详情不包含正文。通过 `get_network_request_body` 读取暂停中的载荷，仅在需要替换正文时向 `update_network_breakpoint` 传递完整的 Base64 正文。中止操作要求 `confirm=true`。
 
 ## Agent Skills
 
-源码仓库和发布目录包含英文 Agent Skill 包 `skills/fiddler-classic-cli`。该包遵循 `SKILL.md` 约定，并包含用于发现的 `agents/openai.yaml` 元数据。Skill 可从相邻发布目录、本地发布包或可信 GitHub 发布版本引导安装缺失的 CLI，并涵盖流量检查、正文分块、守护进程与桥接诊断、代理状态安全和敏感证据处理。
+源码仓库和发布目录包含英文 Agent Skill 包 `skills/fiddler-classic-cli`。该包遵循 `SKILL.md` 约定，`agents/openai.yaml` 包含发现该 Skill 所需的元数据。Skill 随项目发布时会定位根目录中共享的 `install.ps1`，并指引 CLI 任务查阅简短的参考文档，内容包括诊断与应用程序启动、关闭和重启、流量检查、会话操作、AutoResponder 和断点命令。
 
 ## 安全
 
-抓包流量是原始证据。桥接不会脱敏、标准化或静默转换请求头与正文。显式输出可能包含密码、Cookie、Bearer 令牌、API 密钥和个人数据。请妥善处理终端输出、MCP 对话记录、正文文件和 SAZ 归档。
+抓包流量是原始证据。桥接不会脱敏、标准化或静默转换标头与正文。显式输出可能包含密码、Cookie、Bearer 令牌、API 密钥和个人数据。请将终端输出、MCP 对话记录、正文文件和 SAZ 归档作为敏感证据保护。
 
 - 桥接和 CLI 守护进程的命名管道仅允许当前 Windows 用户访问。
-- HTTP 仅绑定 `127.0.0.1`，并使用保存在当前用户 ACL 下的 256 位 Bearer 令牌。
-- 请求头名称和值会经过校验，并拒绝 CRLF 注入。
-- 协议帧、请求正文、结果数量和 MCP 正文分块都有大小限制。
+- MCP HTTP 默认禁用并仅绑定回环地址。绑定到 IPv4 `0.0.0.0` 前必须明确确认明文凭据风险。
+- 每个 HTTP 请求都必须携带 256 位 Bearer 凭据。命名客户端令牌只保存 SHA-256 哈希。默认 CLI 令牌为兼容而保留，仍可在当前用户 ACL 保护下读取。
+- 输入校验会检查标头名称和值，并拒绝 CRLF 注入。
+- 协议帧、请求正文、结果数量和 MCP 正文分块均有上限。
 - 托管断点触发器默认为一次性，并在有限等待时间后自动继续暂停的流量。
-- AutoResponder 操作字符串会被原样保留，可以影响网络流量或访问当前用户有权读取的路径。
+- 桥接会原样保留 AutoResponder 操作字符串。这些操作可以影响网络流量或访问当前用户有权读取的路径。
 - `capture start|stop` 只负责将 Fiddler 挂接为系统代理或取消挂接。
 - 本项目不会安装或信任根证书。
 
 操作指南见 [SECURITY.zh-CN.md](SECURITY.zh-CN.md)。
-
-## 许可证
-
-Copyright 2026 SpecterShell。本项目采用 [Apache License 2.0](LICENSE) 许可证。
 
 ## 开发
 
@@ -232,7 +251,7 @@ dotnet publish ./src/FiddlerClassic.Host/FiddlerClassic.Host.csproj -c Release -
 
 [构建与发布工作流](.github/workflows/build-release.yml)会在拉取请求、推送到 `main`、版本标签和手动触发时运行。它会在 `windows-2025` 运行器上安装固定版本的 Fiddler Classic 编译引用，优先使用 WinGet，并在 WinGet 不可用或安装失败时改用 Chocolatey。随后，工作流会执行全部自动化测试，创建自包含发布包，验证校验值和必要文件，并上传两个发布文件。匹配 `v*` 的标签会将已测试文件发布为 GitHub Release；带有预发布后缀的标签（例如 `v0.3.0-preview.1`）会创建预发布版本。
 
-工作流只将 Fiddler 用作扩展编译引用，不会在产物中包含 `Fiddler.exe`。
+发布检查覆盖归档拒绝规则、临时安装、同版本重装和并存升级，并验证同一个发布桥接 DLL 与 Fiddler `5.0.20253.3311` 和 `6.0.20261.7291` 的直接 API 元数据兼容性。手动启用 `run_fiddler_compatibility` 后，一次性运行器还会执行原生 UI 检查，包括未选中标签页时的启动行为和卸载时的清理。哪些检查需要显式启用，见[安装指南](docs/zh-CN/installation.md#github-actions)。发布产物不包含 Telerik 二进制文件、原生用户配置或测试探针。
 
 自动化测试使用模拟命名管道对端，并覆盖两种 MCP 传输。真实 Fiddler 测试需要显式启用：
 
@@ -243,4 +262,8 @@ dotnet publish ./src/FiddlerClassic.Host/FiddlerClassic.Host.csproj -c Release -
 | `FIDDLER_CLASSIC_DESTRUCTIVE_INTEGRATION=1` | 清空和恢复 SAZ |
 | `FIDDLER_CLASSIC_PROXY_INTEGRATION=1` | 挂接/取消系统代理，并恢复原始状态 |
 
-只应在受控的 Fiddler 配置中运行门控测试。自动化测试会暂时替换并恢复 AutoResponder 规则列表，并通过实时断点发送回环流量。破坏性测试会备份并恢复会话列表，但仍会操作当前抓包证据。
+需要显式启用的测试只应在受控的 Fiddler 配置中运行。自动化测试会暂时替换并恢复 AutoResponder 规则列表，并通过实时断点发送回环流量。破坏性测试会备份并恢复会话列表，测试期间会修改当前抓包证据。
+
+## 许可证
+
+Copyright 2026 SpecterShell。本项目采用 [Apache License 2.0](LICENSE) 许可证。

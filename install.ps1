@@ -12,7 +12,7 @@ The path to a release ZIP or an extracted self-contained publish directory.
 
 .PARAMETER Repository
 The trusted GitHub repository in owner/name form. When omitted, the installer attempts to read an
-origin URL from the Git checkout containing this skill.
+origin URL from the Git checkout containing this installer.
 
 .PARAMETER Version
 The GitHub release tag to install. The default value selects the latest published release.
@@ -26,28 +26,28 @@ Skips current-user PATH changes. This is useful for isolated tests and managed e
 [CmdletBinding()]
 param(
     [string]$PackagePath,
-    [ValidatePattern("^[^/\\\s]+/[^/\\\s]+$")]
+    [ValidatePattern('^[^/\\\s]+/[^/\\\s]+$')]
     [string]$Repository,
-    [string]$Version = "latest",
+    [string]$Version = 'latest',
     [string]$InstallRoot = "$env:LOCALAPPDATA/Programs/FiddlerClassicCLI",
     [switch]$NoPathUpdate
 )
 
-$ErrorActionPreference = "Stop"
-$assetName = "fiddler-classic-win-x64.zip"
-$checksumName = "SHA256SUMS"
+$ErrorActionPreference = 'Stop'
+$assetName = 'fiddler-classic-win-x64.zip'
+$checksumName = 'SHA256SUMS'
 $temporaryDirectory = $null
 
-# Walks from the skill directory toward the filesystem root to find a published CLI payload.
+# Walks from the installer directory toward the filesystem root to find a published CLI payload.
 function Find-LocalPayload {
     $current = Get-Item -LiteralPath $PSScriptRoot
     while ($null -ne $current) {
-        $directExecutable = Join-Path $current.FullName "fiddler-classic.exe"
+        $directExecutable = Join-Path $current.FullName 'fiddler-classic.exe'
         if (Test-Path -LiteralPath $directExecutable -PathType Leaf) {
             return $current.FullName
         }
 
-        $sourcePublishDirectory = Join-Path $current.FullName "artifacts/publish/win-x64"
+        $sourcePublishDirectory = Join-Path $current.FullName 'artifacts/publish/win-x64'
         if (Test-Path -LiteralPath "$sourcePublishDirectory/fiddler-classic.exe" -PathType Leaf) {
             return $sourcePublishDirectory
         }
@@ -62,14 +62,14 @@ function Find-LocalPayload {
 function Find-GitHubRepository {
     $current = Get-Item -LiteralPath $PSScriptRoot
     while ($null -ne $current) {
-        if (Test-Path -LiteralPath (Join-Path $current.FullName ".git")) {
+        if (Test-Path -LiteralPath (Join-Path $current.FullName '.git')) {
             $origin = & git -C $current.FullName remote get-url origin 2>$null
             if ($LASTEXITCODE -eq 0 -and $origin) {
                 $match = [regex]::Match(
                     $origin.Trim(),
-                    "github\.com(?::|/)(?<repository>[^/\s]+/[^/\s]+?)(?:\.git)?$")
+                    'github\.com(?::|/)(?<repository>[^/\s]+/[^/\s]+?)(?:\.git)?$')
                 if ($match.Success) {
-                    return $match.Groups["repository"].Value
+                    return $match.Groups['repository'].Value
                 }
             }
 
@@ -85,9 +85,9 @@ function Find-GitHubRepository {
 # Returns request headers for public or token-authenticated GitHub release API calls.
 function Get-GitHubHeaders {
     $headers = @{
-        Accept = "application/vnd.github+json"
-        "User-Agent" = "fiddler-classic-installer"
-        "X-GitHub-Api-Version" = "2022-11-28"
+        Accept                 = 'application/vnd.github+json'
+        'User-Agent'           = 'fiddler-classic-installer'
+        'X-GitHub-Api-Version' = '2022-11-28'
     }
 
     if ($env:GITHUB_TOKEN) {
@@ -109,7 +109,7 @@ function Confirm-PackageChecksum {
     $archiveName = [System.IO.Path]::GetFileName($ArchivePath)
     $expectedHash = $null
     foreach ($line in Get-Content -LiteralPath $ManifestPath) {
-        if ($line -match "^([A-Fa-f0-9]{64})\s+\*?(.+)$" -and $matches[2].Trim() -eq $archiveName) {
+        if ($line -match '^([A-Fa-f0-9]{64})\s+\*?(.+)$' -and $matches[2].Trim() -eq $archiveName) {
             $expectedHash = $matches[1].ToLowerInvariant()
             break
         }
@@ -139,10 +139,9 @@ function Receive-GitHubPackage {
     )
 
     $escapedVersion = [uri]::EscapeDataString($ReleaseVersion)
-    if ($ReleaseVersion -eq "latest") {
+    if ($ReleaseVersion -eq 'latest') {
         $releaseUri = "https://api.github.com/repos/$RepositoryName/releases/latest"
-    }
-    else {
+    } else {
         $releaseUri = "https://api.github.com/repos/$RepositoryName/releases/tags/$escapedVersion"
     }
 
@@ -172,7 +171,7 @@ function Expand-PackagePayload {
         [string]$DestinationDirectory
     )
 
-    $expandedDirectory = Join-Path $DestinationDirectory "expanded"
+    $expandedDirectory = Join-Path $DestinationDirectory 'expanded'
     Expand-Archive -LiteralPath $ArchivePath -DestinationPath $expandedDirectory -Force
     if (Test-Path -LiteralPath "$expandedDirectory/fiddler-classic.exe" -PathType Leaf) {
         return $expandedDirectory
@@ -180,11 +179,11 @@ function Expand-PackagePayload {
 
     $children = @(Get-ChildItem -LiteralPath $expandedDirectory -Directory)
     if ($children.Count -eq 1 -and
-        (Test-Path -LiteralPath (Join-Path $children[0].FullName "fiddler-classic.exe") -PathType Leaf)) {
+        (Test-Path -LiteralPath (Join-Path $children[0].FullName 'fiddler-classic.exe') -PathType Leaf)) {
         return $children[0].FullName
     }
 
-    throw "The release archive does not contain a self-contained fiddler-classic.exe payload."
+    throw 'The release archive does not contain a self-contained fiddler-classic.exe payload.'
 }
 
 # Executes the candidate CLI and returns its version only when the process exits successfully.
@@ -194,14 +193,14 @@ function Get-PayloadVersion {
         [string]$PayloadDirectory
     )
 
-    $executable = Join-Path $PayloadDirectory "fiddler-classic.exe"
+    $executable = Join-Path $PayloadDirectory 'fiddler-classic.exe'
     if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
         throw "The CLI executable was not found in '$PayloadDirectory'."
     }
 
     $reportedVersion = (& $executable --version 2>&1 | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or -not $reportedVersion) {
-        throw "The candidate fiddler-classic.exe did not report a valid version."
+        throw 'The candidate fiddler-classic.exe did not report a valid version.'
     }
 
     return $reportedVersion
@@ -217,22 +216,22 @@ function Set-ManagedPath {
     $normalizedRoot = [System.IO.Path]::GetFullPath($InstallRoot).TrimEnd('\', '/')
     $managedPrefix = "$normalizedRoot\"
 
-    $userEntries = @([Environment]::GetEnvironmentVariable("Path", "User") -split ";" |
-        Where-Object { $_ -and -not ([System.IO.Path]::GetFullPath($_).StartsWith($managedPrefix, [StringComparison]::OrdinalIgnoreCase)) })
-    $newUserPath = (@($InstalledDirectory) + $userEntries) -join ";"
-    [Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
+    $userEntries = @([Environment]::GetEnvironmentVariable('Path', 'User') -split ';' |
+            Where-Object { $_ -and -not ([System.IO.Path]::GetFullPath($_).StartsWith($managedPrefix, [StringComparison]::OrdinalIgnoreCase)) })
+    $newUserPath = (@($InstalledDirectory) + $userEntries) -join ';'
+    [Environment]::SetEnvironmentVariable('Path', $newUserPath, 'User')
 
-    $processEntries = @($env:Path -split ";" |
-        Where-Object { $_ -and -not ([System.IO.Path]::GetFullPath($_).StartsWith($managedPrefix, [StringComparison]::OrdinalIgnoreCase)) })
-    $env:Path = (@($InstalledDirectory) + $processEntries) -join ";"
+    $processEntries = @($env:Path -split ';' |
+            Where-Object { $_ -and -not ([System.IO.Path]::GetFullPath($_).StartsWith($managedPrefix, [StringComparison]::OrdinalIgnoreCase)) })
+    $env:Path = (@($InstalledDirectory) + $processEntries) -join ';'
 }
 
-if ($env:OS -ne "Windows_NT" -or -not [Environment]::Is64BitOperatingSystem) {
-    throw "fiddler-classic requires 64-bit Windows."
+if ($env:OS -ne 'Windows_NT' -or -not [Environment]::Is64BitOperatingSystem) {
+    throw 'fiddler-classic requires 64-bit Windows.'
 }
 
 if ($PackagePath -and $Repository) {
-    throw "Specify PackagePath or Repository, not both."
+    throw 'Specify PackagePath or Repository, not both.'
 }
 
 try {
@@ -241,8 +240,7 @@ try {
         $resolvedPackage = (Resolve-Path -LiteralPath $PackagePath).Path
         if (Test-Path -LiteralPath $resolvedPackage -PathType Container) {
             $payloadDirectory = $resolvedPackage
-        }
-        elseif ([System.IO.Path]::GetExtension($resolvedPackage) -ieq ".zip") {
+        } elseif ([System.IO.Path]::GetExtension($resolvedPackage) -ieq '.zip') {
             $manifestPath = Join-Path (Split-Path -Parent $resolvedPackage) $checksumName
             if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
                 throw "A local release ZIP requires a sibling '$checksumName' manifest."
@@ -252,12 +250,10 @@ try {
             $temporaryDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
             New-Item -ItemType Directory -Path $temporaryDirectory | Out-Null
             $payloadDirectory = Expand-PackagePayload -ArchivePath $resolvedPackage -DestinationDirectory $temporaryDirectory
+        } else {
+            throw 'PackagePath must identify a release ZIP or an extracted publish directory.'
         }
-        else {
-            throw "PackagePath must identify a release ZIP or an extracted publish directory."
-        }
-    }
-    else {
+    } else {
         $payloadDirectory = Find-LocalPayload
         if (-not $payloadDirectory) {
             if (-not $Repository) {
@@ -265,7 +261,7 @@ try {
             }
 
             if (-not $Repository) {
-                throw "No local payload or GitHub origin was found. Supply PackagePath or a trusted Repository in owner/name form."
+                throw 'No local payload or GitHub origin was found. Supply PackagePath or a trusted Repository in owner/name form.'
             }
 
             $temporaryDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
@@ -279,23 +275,28 @@ try {
     }
 
     $reportedVersion = Get-PayloadVersion -PayloadDirectory $payloadDirectory
-    if ($reportedVersion -notmatch "^[0-9]+(?:\.[0-9]+){1,3}(?:[-.][0-9A-Za-z]+)*$" -or
-        $reportedVersion.Contains("..")) {
-        throw "The candidate CLI reported an invalid version directory name."
+    if ($reportedVersion -notmatch '^[0-9]+(?:\.[0-9]+){1,3}(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?(?:\+[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$' -or
+        $reportedVersion.Contains('..')) {
+        throw 'The candidate CLI reported an invalid version directory name.'
     }
 
-    $safeVersion = [regex]::Replace($reportedVersion, "[^0-9A-Za-z._-]", "_")
+    $safeVersion = [regex]::Replace($reportedVersion, '[^0-9A-Za-z._-]', '_')
     $installedDirectory = Join-Path ([System.IO.Path]::GetFullPath($InstallRoot)) $safeVersion
     New-Item -ItemType Directory -Path $installedDirectory -Force | Out-Null
 
-    foreach ($item in Get-ChildItem -LiteralPath $payloadDirectory -Force) {
-        Copy-Item -LiteralPath $item.FullName -Destination $installedDirectory -Recurse -Force
+    # An installer run from its installed directory already has the requested payload in place.
+    $sourcePath = [System.IO.Path]::GetFullPath($payloadDirectory).TrimEnd('\', '/')
+    $destinationPath = [System.IO.Path]::GetFullPath($installedDirectory).TrimEnd('\', '/')
+    if (-not $sourcePath.Equals($destinationPath, [StringComparison]::OrdinalIgnoreCase)) {
+        foreach ($item in Get-ChildItem -LiteralPath $payloadDirectory -Force) {
+            Copy-Item -LiteralPath $item.FullName -Destination $installedDirectory -Recurse -Force
+        }
     }
 
-    $installedExecutable = Join-Path $installedDirectory "fiddler-classic.exe"
+    $installedExecutable = Join-Path $installedDirectory 'fiddler-classic.exe'
     $installedVersion = (& $installedExecutable --version 2>&1 | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or $installedVersion -ne $reportedVersion) {
-        throw "The installed CLI failed version verification."
+        throw 'The installed CLI failed version verification.'
     }
 
     if (-not $NoPathUpdate) {
@@ -304,15 +305,13 @@ try {
 
     Write-Host "Installed fiddler-classic $installedVersion to $installedDirectory"
     if ($NoPathUpdate) {
-        Write-Host "PATH was not changed."
-    }
-    else {
-        Write-Host "Updated the current-user PATH and this PowerShell session."
+        Write-Host 'PATH was not changed.'
+    } else {
+        Write-Host 'Updated the current-user PATH and this PowerShell session.'
     }
 
     Write-Output $installedExecutable
-}
-finally {
+} finally {
     if ($temporaryDirectory -and (Test-Path -LiteralPath $temporaryDirectory)) {
         Remove-Item -LiteralPath $temporaryDirectory -Recurse -Force -ErrorAction SilentlyContinue
     }

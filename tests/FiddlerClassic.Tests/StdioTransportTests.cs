@@ -46,7 +46,9 @@ public sealed class StdioTransportTests
             using var tools = JsonDocument.Parse(toolsLine);
 
             Assert.Equal(2, tools.RootElement.GetProperty("id").GetInt32());
-            Assert.Equal(35, tools.RootElement.GetProperty("result").GetProperty("tools").GetArrayLength());
+            Assert.Equal(36, tools.RootElement.GetProperty("result").GetProperty("tools").GetArrayLength());
+            Assert.Contains(tools.RootElement.GetProperty("result").GetProperty("tools").EnumerateArray(),
+                tool => tool.GetProperty("name").GetString() == "summarize_network_requests");
 
             var pipeTask = FakePipeServer.ServeOnceAsync(request => FakePipeServer.Success(
                 request,

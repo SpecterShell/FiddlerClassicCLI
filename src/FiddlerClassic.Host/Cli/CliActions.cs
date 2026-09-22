@@ -2,6 +2,7 @@
 using System.Text;
 using System.Runtime.CompilerServices;
 using FiddlerClassic.Host.Bridge;
+using FiddlerClassic.Host.Daemon;
 using FiddlerClassic.Host.Mcp;
 using FiddlerClassic.Host.Services;
 using FiddlerClassic.Protocol;
@@ -16,6 +17,8 @@ internal sealed class CliActions
     private readonly FiddlerEnvironment _environment;
     private readonly StatusService _statusService;
     private readonly SessionExportService _sessionExporter;
+
+    internal ConfigStore ConfigurationStore => _configStore;
 
     /// <summary>
     /// Creates the CLI operation facade from shared bridge, installation, configuration, and status services.
@@ -58,7 +61,7 @@ internal sealed class CliActions
         {
             new("windows", OperatingSystem.IsWindows(), "Windows is required."),
             new("fiddler-installed", status.FiddlerInstalled, status.FiddlerPath ?? "Fiddler Classic was not found."),
-            new("fiddler-5x", status.FiddlerVersion?.StartsWith("5.", StringComparison.Ordinal) == true, status.FiddlerVersion ?? "Version unavailable."),
+            new("fiddler-supported-version", FiddlerEnvironment.IsSupportedVersion(status.FiddlerVersion), status.FiddlerVersion ?? "Version unavailable."),
             new("bridge-installed", status.BridgeInstalled, _environment.BridgeDestinationPath),
             new("fiddler-running", status.FiddlerRunning, status.FiddlerProcessId?.ToString() ?? "Fiddler is not running."),
             new(
@@ -92,6 +95,20 @@ internal sealed class CliActions
             request,
             cancellationToken);
     }
+
+    /// <summary>Aggregates one bounded metadata page without requesting headers or bodies.</summary>
+    /// <param name="request">Metadata filters and the explicit result bound.</param>
+    /// <param name="cancellationToken">Cancels retrieval and aggregation.</param>
+    public Task<SessionSummaryResult> SummarizeSessions(ListSessionsRequest request, CancellationToken cancellationToken)
+        => new SessionSummaryService(_bridgeClient).SummarizeAsync(request, cancellationToken);
+
+    /// <summary>Exports allowlisted diagnostics using probes that cannot start the daemon.</summary>
+    /// <param name="outputPath">A new absolute destination file.</param>
+    /// <param name="daemonClient">The non-starting daemon status client.</param>
+    /// <param name="cancellationToken">Cancels probing and file publication.</param>
+    public Task<DiagnosticExportResult> ExportDiagnostics(string outputPath, DaemonClient daemonClient,
+        CancellationToken cancellationToken)
+        => new DiagnosticExportService(_environment, daemonClient).ExportAsync(outputPath, cancellationToken);
 
     /// <summary>
     /// Watches completed sessions after an explicit cursor or the current newest session until an inactivity timeout.

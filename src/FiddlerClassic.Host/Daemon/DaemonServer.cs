@@ -4,6 +4,8 @@ using System.IO.Pipes;
 using System.Reflection;
 using System.Text.Json;
 using FiddlerClassic.Host.Bridge;
+using FiddlerClassic.Host.Mcp;
+using FiddlerClassic.Host.Services;
 using FiddlerClassic.Protocol;
 
 namespace FiddlerClassic.Host.Daemon;
@@ -17,13 +19,14 @@ internal sealed class DaemonServer
 
     private readonly string _pipeName;
     private readonly TimeSpan _bridgeTimeout;
+    private readonly HttpServiceManager _httpService;
     private readonly CancellationTokenSource _stopSource = new();
     private readonly ConcurrentDictionary<int, Task> _connections = new();
     private readonly DateTime _startedAtUtc = DateTime.UtcNow;
     private int _nextConnectionId;
 
     public DaemonServer()
-        : this(DaemonPipeNames.ForCurrentUser(), TimeSpan.FromSeconds(70))
+        : this(DaemonPipeNames.ForCurrentUser(), TimeSpan.FromSeconds(70), new ConfigStore())
     {
     }
 
@@ -33,9 +36,15 @@ internal sealed class DaemonServer
     /// <param name="pipeName">The current-user pipe that accepts CLI clients.</param>
     /// <param name="bridgeTimeout">The maximum duration of a relayed Fiddler bridge exchange.</param>
     internal DaemonServer(string pipeName, TimeSpan bridgeTimeout)
+        : this(pipeName, bridgeTimeout, new ConfigStore())
+    {
+    }
+
+    internal DaemonServer(string pipeName, TimeSpan bridgeTimeout, ConfigStore configStore)
     {
         _pipeName = pipeName;
         _bridgeTimeout = bridgeTimeout;
+        _httpService = new HttpServiceManager(configStore);
     }
 
     /// <summary>
@@ -50,6 +59,7 @@ internal sealed class DaemonServer
             using var linkedSource = CancellationTokenSource.CreateLinkedTokenSource(
                 cancellationToken,
                 _stopSource.Token);
+            await _httpService.InitializeAsync(linkedSource.Token).ConfigureAwait(false);
 
             while (!linkedSource.IsCancellationRequested)
             {
@@ -78,6 +88,7 @@ internal sealed class DaemonServer
         }
         finally
         {
+            await _httpService.DisposeAsync().ConfigureAwait(false);
             _stopSource.Dispose();
         }
     }
@@ -107,7 +118,7 @@ internal sealed class DaemonServer
                     JsonSerializer.Serialize(response, JsonOptions),
                     cancellationToken).ConfigureAwait(false);
 
-                if (string.Equals(request.Method, DaemonProtocol.Stop, StringComparison.Ordinal))
+                if (response.Success && string.Equals(request.Method, DaemonProtocol.Stop, StringComparison.Ordinal))
                 {
                     _stopSource.Cancel();
                 }
@@ -164,9 +175,70 @@ internal sealed class DaemonServer
                         return Success(request, responseJson);
                     }
 
+                case DaemonProtocol.HttpServiceStatus:
+                    return Success(request, JsonSerializer.Serialize(_httpService.GetStatus(), JsonOptions));
+
+                case DaemonProtocol.ConfigureHttpService:
+                    return Success(
+                        request,
+                        JsonSerializer.Serialize(
+                            await _httpService.ConfigureAsync(
+                                ReadPayload<ConfigureHttpServiceRequest>(request),
+                                cancellationToken).ConfigureAwait(false),
+                            JsonOptions));
+
+                case DaemonProtocol.EnableHttpService:
+                    return Success(
+                        request,
+                        JsonSerializer.Serialize(
+                            await _httpService.EnableAsync(
+                                ReadPayload<SetHttpServiceEnabledRequest>(request).Confirm,
+                                cancellationToken).ConfigureAwait(false),
+                            JsonOptions));
+
+                case DaemonProtocol.DisableHttpService:
+                    return Success(
+                        request,
+                        JsonSerializer.Serialize(
+                            await _httpService.DisableAsync(
+                                ReadPayload<SetHttpServiceEnabledRequest>(request).Confirm,
+                                cancellationToken).ConfigureAwait(false),
+                            JsonOptions));
+
+                case DaemonProtocol.ListHttpClients:
+                    return Success(request, JsonSerializer.Serialize(_httpService.ListClients(), JsonOptions));
+
+                case DaemonProtocol.AuthorizeHttpClient:
+                    return Success(
+                        request,
+                        JsonSerializer.Serialize(
+                            _httpService.AuthorizeClient(ReadPayload<AuthorizeHttpClientRequest>(request)),
+                            JsonOptions));
+
+                case DaemonProtocol.DeauthorizeHttpClient:
+                    return Success(
+                        request,
+                        JsonSerializer.Serialize(
+                            _httpService.DeauthorizeClient(ReadPayload<DeauthorizeHttpClientRequest>(request)),
+                            JsonOptions));
+
+                case DaemonProtocol.ListHttpConnections:
+                    return Success(request, JsonSerializer.Serialize(_httpService.ListConnections(), JsonOptions));
+
+                case DaemonProtocol.DisconnectHttpConnection:
+                    return Success(
+                        request,
+                        JsonSerializer.Serialize(
+                            _httpService.Disconnect(ReadPayload<DisconnectHttpConnectionRequest>(request)),
+                            JsonOptions));
+
                 default:
                     return Error(request, ErrorCodes.InvalidRequest, $"Unknown CLI daemon method '{request.Method}'.");
             }
+        }
+        catch (HttpAdministrationException exception)
+        {
+            return Error(request, exception.Code, exception.Message);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -190,6 +262,12 @@ internal sealed class DaemonServer
         {
             return Error(request, ErrorCodes.Internal, exception.Message);
         }
+    }
+
+    private static T ReadPayload<T>(DaemonRequest request)
+    {
+        return JsonSerializer.Deserialize<T>(request.PayloadJson, JsonOptions)
+            ?? throw new InvalidDataException($"The payload for '{request.Method}' is invalid.");
     }
 
     /// <summary>
@@ -227,7 +305,9 @@ internal sealed class DaemonServer
             ProcessId = Environment.ProcessId,
             StartedAtUtc = _startedAtUtc.ToString("O"),
             PipeName = _pipeName,
-            HostVersion = informationalVersion ?? assembly.GetName().Version?.ToString() ?? "unknown"
+            HostVersion = informationalVersion ?? assembly.GetName().Version?.ToString() ?? "unknown",
+            Capabilities = new[] { DaemonProtocol.ManagedHttpCapability },
+            HttpService = _httpService.GetStatus()
         };
     }
 
@@ -251,19 +331,8 @@ internal sealed class DaemonServer
     /// </summary>
     private NamedPipeServerStream CreateOwnershipPipe()
     {
-        try
-        {
-            return new NamedPipeServerStream(
-                DaemonPipeNames.OwnershipPipeName(_pipeName),
-                PipeDirection.InOut,
-                1,
-                PipeTransmissionMode.Byte,
-                PipeOptions.FirstPipeInstance | PipeOptions.CurrentUserOnly);
-        }
-        catch (IOException exception)
-        {
-            throw new InvalidOperationException("Another Fiddler Classic CLI daemon is already running.", exception);
-        }
+        return DaemonOwnership.TryAcquire(_pipeName)
+            ?? throw new InvalidOperationException("Daemon ownership is unavailable. Another daemon or offline configuration operation may be active; retry startup.");
     }
 
     private static DaemonResponse Success(DaemonRequest request, string payloadJson)

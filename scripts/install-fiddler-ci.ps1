@@ -13,15 +13,15 @@ The Chocolatey package source used when WinGet is unavailable or unsuccessful.
 #>
 [CmdletBinding()]
 param(
-    [string]$Version = "5.0.20262.6151",
+    [string]$Version = "6.0.20261.7291",
     [string]$WingetPackageId = "Telerik.Fiddler.Classic",
     [string]$ChocolateySource = "https://community.chocolatey.org/api/v2/"
 )
 
 $ErrorActionPreference = "Stop"
 
-if ($env:GITHUB_ACTIONS -ne "true") {
-    throw "This installer is restricted to GitHub Actions runners."
+if ($env:GITHUB_ACTIONS -ne "true" -or $env:RUNNER_ENVIRONMENT -ne "github-hosted") {
+    throw "This installer is restricted to disposable GitHub-hosted runners."
 }
 
 $fiddlerPath = Join-Path $env:LOCALAPPDATA "Programs/Fiddler/Fiddler.exe"

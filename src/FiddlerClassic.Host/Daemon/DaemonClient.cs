@@ -75,7 +75,16 @@ internal sealed class DaemonClient
         while (DateTime.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var status = await TryGetStatusAsync(cancellationToken).ConfigureAwait(false);
+            DaemonStatus? status = null;
+            try
+            {
+                status = await TryGetStatusAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (DaemonClientException exception) when (exception.Code == ErrorCodes.Timeout)
+            {
+                // The child can hold ownership while initializing its listener. Keep waiting within
+                // the startup deadline; this never permits offline work or a second process launch.
+            }
             if (status is not null)
             {
                 return status;
@@ -98,27 +107,43 @@ internal sealed class DaemonClient
     }
 
     /// <summary>
-    /// Returns daemon status or <see langword="null"/> when the daemon is absent or does not answer promptly.
+    /// Returns null only when no control connection was established and daemon ownership is available.
+    /// A connected, busy, inaccessible, or unresponsive peer remains an error, not an offline fallback.
     /// </summary>
     /// <param name="cancellationToken">Cancels the status exchange.</param>
     public async Task<DaemonStatus?> TryGetStatusAsync(CancellationToken cancellationToken = default)
     {
+        var connected = false;
         try
         {
             return await SendAsync<DaemonStatus>(
                 DaemonProtocol.Status,
                 "{}",
                 TimeSpan.FromMilliseconds(500),
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                onConnected: () => connected = true).ConfigureAwait(false);
         }
-        catch (DaemonClientException exception) when (exception.Code is ErrorCodes.Unavailable or ErrorCodes.Timeout)
+        catch (DaemonClientException exception) when (exception.Code == ErrorCodes.Timeout && !connected)
         {
+            using var ownership = DaemonOwnership.TryAcquire(_pipeName);
+            if (ownership is null)
+            {
+                throw;
+            }
             return null;
         }
     }
 
+    /// <summary>Prevents daemon startup for the complete offline read or configuration transaction.</summary>
+    internal IDisposable AcquireOfflineAccess()
+    {
+        return DaemonOwnership.TryAcquire(_pipeName)
+            ?? throw new DaemonClientException(ErrorCodes.Unavailable,
+                "Daemon ownership is unavailable. It may have started during the status check; retry the operation.");
+    }
+
     /// <summary>
-    /// Requests an orderly shutdown and waits until the daemon pipe is no longer reachable.
+    /// Requests an orderly shutdown and waits until the daemon releases its ownership pipe.
     /// </summary>
     /// <param name="cancellationToken">Cancels status checks, the stop request, and polling delays.</param>
     public async Task<DaemonStopResult> StopAsync(CancellationToken cancellationToken = default)
@@ -137,7 +162,9 @@ internal sealed class DaemonClient
         var deadline = DateTime.UtcNow + _startTimeout;
         while (DateTime.UtcNow < deadline)
         {
-            if (await TryGetStatusAsync(cancellationToken).ConfigureAwait(false) is null)
+            cancellationToken.ThrowIfCancellationRequested();
+            using var ownership = DaemonOwnership.TryAcquire(_pipeName);
+            if (ownership is not null)
             {
                 return new DaemonStopResult { WasRunning = true };
             }
@@ -163,6 +190,113 @@ internal sealed class DaemonClient
             cancellationToken).ConfigureAwait(false);
     }
 
+    public Task<HttpServiceStatus> GetHttpServiceStatusAsync(CancellationToken cancellationToken = default)
+    {
+        return SendManagedHttpAsync<EmptyRequest, HttpServiceStatus>(
+            DaemonProtocol.HttpServiceStatus,
+            new EmptyRequest(),
+            cancellationToken);
+    }
+
+    public Task<HttpServiceStatus> ConfigureHttpServiceAsync(
+        ConfigureHttpServiceRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        return SendManagedHttpAsync<ConfigureHttpServiceRequest, HttpServiceStatus>(
+            DaemonProtocol.ConfigureHttpService,
+            request,
+            cancellationToken);
+    }
+
+    public Task<HttpServiceStatus> EnableHttpServiceAsync(
+        bool confirm,
+        CancellationToken cancellationToken = default)
+    {
+        return SendManagedHttpAsync<SetHttpServiceEnabledRequest, HttpServiceStatus>(
+            DaemonProtocol.EnableHttpService,
+            new SetHttpServiceEnabledRequest { Confirm = confirm },
+            cancellationToken);
+    }
+
+    public Task<HttpServiceStatus> DisableHttpServiceAsync(
+        bool confirm,
+        CancellationToken cancellationToken = default)
+    {
+        return SendManagedHttpAsync<SetHttpServiceEnabledRequest, HttpServiceStatus>(
+            DaemonProtocol.DisableHttpService,
+            new SetHttpServiceEnabledRequest { Confirm = confirm },
+            cancellationToken);
+    }
+
+    public Task<ListHttpClientsResponse> ListHttpClientsAsync(CancellationToken cancellationToken = default)
+    {
+        return SendManagedHttpAsync<EmptyRequest, ListHttpClientsResponse>(
+            DaemonProtocol.ListHttpClients,
+            new EmptyRequest(),
+            cancellationToken);
+    }
+
+    public Task<AuthorizeHttpClientResponse> AuthorizeHttpClientAsync(
+        string name,
+        CancellationToken cancellationToken = default)
+    {
+        return SendManagedHttpAsync<AuthorizeHttpClientRequest, AuthorizeHttpClientResponse>(
+            DaemonProtocol.AuthorizeHttpClient,
+            new AuthorizeHttpClientRequest { Name = name },
+            cancellationToken);
+    }
+
+    public Task<DeauthorizeHttpClientResponse> DeauthorizeHttpClientAsync(
+        string clientId,
+        bool confirm,
+        CancellationToken cancellationToken = default)
+    {
+        return SendManagedHttpAsync<DeauthorizeHttpClientRequest, DeauthorizeHttpClientResponse>(
+            DaemonProtocol.DeauthorizeHttpClient,
+            new DeauthorizeHttpClientRequest { ClientId = clientId, Confirm = confirm },
+            cancellationToken);
+    }
+
+    public Task<ListHttpConnectionsResponse> ListHttpConnectionsAsync(CancellationToken cancellationToken = default)
+    {
+        return SendManagedHttpAsync<EmptyRequest, ListHttpConnectionsResponse>(
+            DaemonProtocol.ListHttpConnections,
+            new EmptyRequest(),
+            cancellationToken);
+    }
+
+    public Task<DisconnectHttpConnectionResponse> DisconnectHttpConnectionAsync(
+        string connectionId,
+        bool confirm,
+        CancellationToken cancellationToken = default)
+    {
+        return SendManagedHttpAsync<DisconnectHttpConnectionRequest, DisconnectHttpConnectionResponse>(
+            DaemonProtocol.DisconnectHttpConnection,
+            new DisconnectHttpConnectionRequest { ConnectionId = connectionId, Confirm = confirm },
+            cancellationToken);
+    }
+
+    private async Task<TResponse> SendManagedHttpAsync<TRequest, TResponse>(
+        string method,
+        TRequest request,
+        CancellationToken cancellationToken)
+    {
+        var status = await TryGetStatusAsync(cancellationToken).ConfigureAwait(false)
+            ?? throw new DaemonClientException(ErrorCodes.Unavailable, "The Fiddler Classic CLI daemon is not running.");
+        if (!status.Capabilities.Contains(DaemonProtocol.ManagedHttpCapability, StringComparer.Ordinal))
+        {
+            throw new DaemonClientException(
+                ErrorCodes.ProtocolMismatch,
+                "The running CLI daemon predates managed MCP HTTP support. Stop and restart the daemon.");
+        }
+
+        return await SendAsync<TResponse>(
+            method,
+            JsonSerializer.Serialize(request, JsonOptions),
+            _requestTimeout,
+            cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>
     /// Exchanges one correlated daemon request and validates its protocol, identity, and result envelope.
     /// </summary>
@@ -171,11 +305,13 @@ internal sealed class DaemonClient
     /// <param name="payloadJson">The serialized method payload.</param>
     /// <param name="timeout">The operation-specific timeout.</param>
     /// <param name="cancellationToken">Cancels the named-pipe exchange.</param>
+    /// <param name="onConnected">Records successful connection for stopped-daemon detection.</param>
     private async Task<T> SendAsync<T>(
         string method,
         string payloadJson,
         TimeSpan timeout,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action? onConnected = null)
     {
         var requestId = Guid.NewGuid().ToString("N");
         var request = new DaemonRequest
@@ -192,7 +328,8 @@ internal sealed class DaemonClient
             var responseJson = await NamedPipeFrameClient.ExchangeAsync(
                 _pipeName,
                 JsonSerializer.Serialize(request, JsonOptions),
-                timeoutSource.Token).ConfigureAwait(false);
+                timeoutSource.Token,
+                onConnected).ConfigureAwait(false);
             var response = JsonSerializer.Deserialize<DaemonResponse>(responseJson, JsonOptions)
                 ?? throw new DaemonClientException(ErrorCodes.InvalidRequest, "The CLI daemon returned an invalid response.");
 

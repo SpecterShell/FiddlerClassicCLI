@@ -3,6 +3,7 @@ using FiddlerClassic.Host.Bridge;
 using FiddlerClassic.Host.Cli;
 using FiddlerClassic.Host.Daemon;
 using FiddlerClassic.Host.Services;
+using FiddlerClassic.Protocol;
 
 if (!OperatingSystem.IsWindows())
 {
@@ -21,4 +22,14 @@ var actions = new CliActions(
     environment,
     new StatusService(bridgeClient, environment));
 
-return CommandFactory.Create(actions, daemonClient).Parse(args).Invoke();
+var root = CommandFactory.Create(actions, daemonClient);
+var parsed = root.Parse(args);
+if (parsed.Errors.Count > 0)
+{
+    // Parser failures follow the same stderr and exit-code contract as handler validation.
+    // A missing option value can prevent later tokens from becoming parsed option results.
+    var json = args.Contains("--json", StringComparer.Ordinal);
+    return CliOutput.Error(new BridgeClientException(ErrorCodes.InvalidRequest,
+        string.Join(Environment.NewLine, parsed.Errors.Select(error => error.Message))), json);
+}
+return parsed.Invoke();

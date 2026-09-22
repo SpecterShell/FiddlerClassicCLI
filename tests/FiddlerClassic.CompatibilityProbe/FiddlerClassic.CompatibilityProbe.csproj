@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net462</TargetFramework>
+    <AssemblyName>FiddlerClassic.CompatibilityProbe</AssemblyName>
+    <!-- The vendor reference has the same Framework metadata conflict handled by the bridge project. -->
+    <NoWarn>$(NoWarn);MSB3277</NoWarn>
+    <FiddlerInstallDir Condition="'$(FiddlerInstallDir)' == ''">$(LOCALAPPDATA)\Programs\Fiddler</FiddlerInstallDir>
+    <ReleasedBridgeDirectory Condition="'$(ReleasedBridgeDirectory)' == ''">$(MSBuildThisFileDirectory)..\..\artifacts\publish\win-x64\bridge</ReleasedBridgeDirectory>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" PrivateAssets="all" />
+    <!-- Only the CI probe is compiled here. The production bridge and protocol come from the release ZIP. -->
+    <Reference Include="Fiddler">
+      <HintPath>$(FiddlerInstallDir)\Fiddler.exe</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="FiddlerClassic.Protocol">
+      <HintPath>$(ReleasedBridgeDirectory)\FiddlerClassic.Protocol.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Web.Extensions" />
+  </ItemGroup>
+  <Target Name="VerifyReleasedReferences" BeforeTargets="ResolveReferences">
+    <Error Condition="!Exists('$(FiddlerInstallDir)\Fiddler.exe')" Text="Install the exact CI reference first." />
+    <Error Condition="!Exists('$(ReleasedBridgeDirectory)\FiddlerClassic.Protocol.dll')" Text="Supply the protocol DLL from the release being tested; the probe never rebuilds it." />
+  </Target>
+</Project>

@@ -121,6 +121,31 @@ public sealed class CliProcessTests
         return new ProcessResult(process.ExitCode, standardOutput, standardError);
     }
 
+    [Theory]
+    [InlineData("sessions list --summary --limit 0 --json")]
+    [InlineData("sessions list --summary --min-duration-ms -1 --json")]
+    [InlineData("doctor --json --output")]
+    [InlineData("mcp service configure --port 65536 --json")]
+    [InlineData("app close --timeout invalid --yes --json")]
+    [InlineData("app restart --timeout invalid --yes --json")]
+    [InlineData("app restart --path --yes --json")]
+    [InlineData("app detect --path relative/Fiddler.exe --json")]
+    [InlineData("app open --path relative/Fiddler.exe --json")]
+    [InlineData("app restart --path relative/Fiddler.exe --yes --json")]
+    [InlineData("app close --pid invalid --yes --json")]
+    [InlineData("app restart --pid 1 --path C:\\Test\\Fiddler.exe --yes --json")]
+    [InlineData("sessions replay 1 --timeout invalid --json")]
+    [InlineData("sessions watch --timeout invalid --json")]
+    [InlineData("request send http://example.test --timeout invalid --json")]
+    public async Task ParserFailuresUseTheStableJsonErrorContract(string arguments)
+    {
+        var result = await RunCli(arguments);
+        Assert.Equal(2, result.ExitCode);
+        Assert.True(string.IsNullOrWhiteSpace(result.StandardOutput));
+        using var document = JsonDocument.Parse(result.StandardError);
+        Assert.Equal(ErrorCodes.InvalidRequest, document.RootElement.GetProperty("error").GetProperty("code").GetString());
+    }
+
     private static async Task StopDaemon()
     {
         var result = await RunCli("daemon stop --json");

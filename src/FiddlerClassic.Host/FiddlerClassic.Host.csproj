@@ -16,10 +16,9 @@
     <None Include="../../README.md" Link="README.md" CopyToPublishDirectory="PreserveNewest" />
     <None Include="../../README.zh-CN.md" Link="README.zh-CN.md" CopyToPublishDirectory="PreserveNewest" />
     <None Include="../../LICENSE" Link="LICENSE" CopyToPublishDirectory="PreserveNewest" />
-    <None Include="../../PLAN.md" Link="PLAN.md" CopyToPublishDirectory="PreserveNewest" />
     <None Include="../../SECURITY.md" Link="SECURITY.md" CopyToPublishDirectory="PreserveNewest" />
     <None Include="../../SECURITY.zh-CN.md" Link="SECURITY.zh-CN.md" CopyToPublishDirectory="PreserveNewest" />
-    <None Include="../../skills/fiddler-classic-cli/scripts/install.ps1" Link="install.ps1" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="../../install.ps1" Link="install.ps1" CopyToPublishDirectory="PreserveNewest" />
     <None Include="../../docs/**/*.md" Link="docs/%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
     <None Include="../../skills/**/*" Link="skills/%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>

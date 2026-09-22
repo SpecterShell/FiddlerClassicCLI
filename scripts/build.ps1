@@ -6,6 +6,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
+$artifactsDirectory = [System.IO.Path]::GetFullPath((Join-Path $repositoryRoot "artifacts"))
+$publishDirectory = [System.IO.Path]::GetFullPath((Join-Path $artifactsDirectory "publish/win-x64"))
+$artifactsPrefix = $artifactsDirectory.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
 $commonArguments = @(
     "--configuration", $Configuration,
     "-p:FiddlerInstallDir=$FiddlerInstallDir"
@@ -17,6 +20,17 @@ if ($Version) {
 & dotnet test "$repositoryRoot/FiddlerClassicCLI.slnx" @commonArguments
 if ($LASTEXITCODE -ne 0) {
     throw "dotnet test failed with exit code $LASTEXITCODE."
+}
+
+$publishIsInsideArtifacts = $publishDirectory.StartsWith(
+    $artifactsPrefix,
+    [System.StringComparison]::OrdinalIgnoreCase)
+if (-not $publishIsInsideArtifacts) {
+    throw "Refusing to clean publish directory outside '$artifactsDirectory'."
+}
+
+if (Test-Path -LiteralPath $publishDirectory) {
+    Remove-Item -LiteralPath $publishDirectory -Recurse -Force
 }
 
 $publishArguments = @($commonArguments) + @("-p:PublishProfile=win-x64")

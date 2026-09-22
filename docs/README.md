@@ -6,4 +6,4 @@
 | CLI guide / CLI 指南 | [Open](en-US/cli.md) | [打开](zh-CN/cli.md) |
 | CLI and MCP design / CLI 与 MCP 设计 | [Open](en-US/design.md) | [打开](zh-CN/design.md) |
 
-Security guidance is available in [English](../SECURITY.md) and [简体中文](../SECURITY.zh-CN.md).
+See the security guidance in [English](../SECURITY.md) or [简体中文](../SECURITY.zh-CN.md).

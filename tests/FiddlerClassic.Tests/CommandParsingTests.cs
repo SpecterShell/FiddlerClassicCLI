@@ -2,6 +2,7 @@
 using FiddlerClassic.Host.Cli;
 using FiddlerClassic.Host.Daemon;
 using FiddlerClassic.Host.Services;
+using FiddlerClassic.Protocol;
 
 namespace FiddlerClassic.Tests;
 
@@ -56,6 +57,15 @@ public sealed class CommandParsingTests
     [InlineData("daemon stop")]
     [InlineData("mcp stdio")]
     [InlineData("mcp http --port 8878")]
+    [InlineData("mcp service status")]
+    [InlineData("mcp service configure --bind all --port 8878")]
+    [InlineData("mcp service enable --yes")]
+    [InlineData("mcp service disable --yes")]
+    [InlineData("mcp clients list")]
+    [InlineData("mcp clients authorize --name agent")]
+    [InlineData("mcp clients deauthorize abc123 --yes")]
+    [InlineData("mcp connections list")]
+    [InlineData("mcp connections disconnect abc123 --yes")]
     [InlineData("config token show")]
     [InlineData("config token rotate")]
     public void ParsesApprovedCommands(string commandLine)
@@ -78,6 +88,10 @@ public sealed class CommandParsingTests
     [InlineData("autoresponder rules update abc123 --comment value --clear-comment")]
     [InlineData("breakpoints arm request --hold 0")]
     [InlineData("breakpoints update abc123 --body value --body-file body.bin")]
+    [InlineData("mcp http --port 0")]
+    [InlineData("mcp service configure")]
+    [InlineData("mcp service configure --bind invalid")]
+    [InlineData("mcp service configure --port 65536")]
     public void RejectsInvalidCommandInput(string commandLine)
     {
         var result = CreateRoot().Parse(commandLine.Split(' ', StringSplitOptions.RemoveEmptyEntries));

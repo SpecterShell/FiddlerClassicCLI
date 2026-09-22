@@ -12,10 +12,12 @@ internal static class NamedPipeFrameClient
     /// <param name="pipeName">The local Windows pipe name.</param>
     /// <param name="requestJson">The complete JSON request payload.</param>
     /// <param name="cancellationToken">Cancels connection, write, or read work.</param>
+    /// <param name="onConnected">Optionally records that the peer was reached before exchanging frames.</param>
     public static async Task<string> ExchangeAsync(
         string pipeName,
         string requestJson,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action? onConnected = null)
     {
         await using var pipe = new NamedPipeClientStream(
             ".",
@@ -24,6 +26,7 @@ internal static class NamedPipeFrameClient
             PipeOptions.Asynchronous);
 
         await pipe.ConnectAsync(cancellationToken).ConfigureAwait(false);
+        onConnected?.Invoke();
         await FrameCodec.WriteAsync(pipe, requestJson, cancellationToken).ConfigureAwait(false);
         return await FrameCodec.ReadAsync(pipe, cancellationToken).ConfigureAwait(false)
             ?? throw new IOException("The named-pipe peer closed the connection without a response.");

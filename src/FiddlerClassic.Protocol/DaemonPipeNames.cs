@@ -1,9 +1,7 @@
 // Derives deterministic current-user pipe names for daemon communication and ownership.
-using FiddlerClassic.Protocol;
+namespace FiddlerClassic.Protocol;
 
-namespace FiddlerClassic.Host.Daemon;
-
-internal static class DaemonPipeNames
+public static class DaemonPipeNames
 {
     private const string OverrideVariable = "FIDDLER_CLASSIC_DAEMON_PIPE_NAME";
 
@@ -28,11 +26,6 @@ internal static class DaemonPipeNames
         return $"{pipeName}.owner";
     }
 
-    /// <summary>
-    /// Rejects pipe names that exceed the local limit or contain unsafe characters.
-    /// </summary>
-    /// <param name="value">The pipe name to validate.</param>
-    /// <param name="source">The setting name reported in validation errors.</param>
     private static void Validate(string value, string source)
     {
         if (value.Length > 200 || value.Any(character =>

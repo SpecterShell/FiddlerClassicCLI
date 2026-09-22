@@ -2,6 +2,7 @@
 using System.Text.Json;
 using FiddlerClassic.Host.Bridge;
 using FiddlerClassic.Host.Daemon;
+using FiddlerClassic.Host.Services;
 
 namespace FiddlerClassic.Host.Cli;
 
@@ -40,9 +41,10 @@ internal static class CliOutput
         {
             BridgeClientException bridgeException => bridgeException.Code,
             DaemonClientException daemonException => daemonException.Code,
+            HttpAdministrationException administrationException => administrationException.Code,
             _ => "internal_error"
         };
-        var exitCode = exception is BridgeClientException or DaemonClientException
+        var exitCode = exception is BridgeClientException or DaemonClientException or HttpAdministrationException
             ? ExitCodes.ForBridgeError(code)
             : ExitCodes.Failure;
 

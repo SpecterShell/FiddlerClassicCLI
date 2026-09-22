@@ -40,7 +40,43 @@ if ($actualHash -ne $expectedHash) {
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archive = [System.IO.Compression.ZipFile]::OpenRead($assetPath)
 try {
-    $entryNames = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
+    # Apply Windows path rules on every verifier platform, including the Linux release job.
+    $entryNames = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $fileNames = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in $archive.Entries) {
+        $name = $entry.FullName.Replace('\', '/')
+        $parts = $name.TrimEnd('/').Split('/')
+        if ($parts -icontains 'Fiddler.exe') {
+            throw "Release archive must not redistribute Fiddler.exe."
+        }
+
+        if ([string]::IsNullOrWhiteSpace($name) -or $name.StartsWith('/') -or
+            $name -match '[\x00-\x1f\x7f<>:"|?*]' -or
+            @($parts | Where-Object {
+                $_ -in @('', '.', '..') -or $_ -match '[. ]$' -or
+                $_ -match '^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)'
+            }).Count -ne 0) {
+            throw "Release archive contains an unsafe Windows path."
+        }
+
+        # Symlinks are not release payloads; extraction behavior differs across platforms.
+        if ((($entry.ExternalAttributes -shr 16) -band 0xF000) -eq 0xA000) {
+            throw "Release archive must not contain symbolic links."
+        }
+        if (-not $entryNames.Add($name.TrimEnd('/'))) {
+            throw "Release archive contains duplicate Windows paths."
+        }
+        if (-not $name.EndsWith('/')) { $null = $fileNames.Add($name) }
+    }
+    foreach ($name in $entryNames) {
+        $parent = $name
+        while ($parent.Contains('/')) {
+            $parent = $parent.Substring(0, $parent.LastIndexOf('/'))
+            if ($fileNames.Contains($parent)) {
+                throw "Release archive contains a file/directory path collision."
+            }
+        }
+    }
     $requiredEntries = @(
         "fiddler-classic.exe",
         "LICENSE",
@@ -48,15 +84,24 @@ try {
         "bridge/FiddlerClassic.Bridge.dll",
         "bridge/FiddlerClassic.Protocol.dll",
         "skills/fiddler-classic-cli/SKILL.md",
-        "skills/fiddler-classic-cli/scripts/install.ps1",
+        "skills/fiddler-classic-cli/references/diagnostics-and-runtime.md",
+        "skills/fiddler-classic-cli/references/capture-and-inspection.md",
+        "skills/fiddler-classic-cli/references/session-actions.md",
+        "skills/fiddler-classic-cli/references/autoresponder.md",
+        "skills/fiddler-classic-cli/references/breakpoints.md",
         "docs/en-US/installation.md",
         "docs/zh-CN/installation.md"
     )
 
     foreach ($requiredEntry in $requiredEntries) {
-        if ($entryNames -notcontains $requiredEntry) {
+        if (-not $fileNames.Contains($requiredEntry)) {
             throw "Release archive is missing '$requiredEntry'."
         }
+    }
+
+    $nestedSkillScripts = @($entryNames | Where-Object { $_ -like "skills/fiddler-classic-cli/scripts/*" })
+    if ($nestedSkillScripts.Count -ne 0) {
+        throw "Release archive must not contain scripts inside the Fiddler Classic CLI skill."
     }
 }
 finally {

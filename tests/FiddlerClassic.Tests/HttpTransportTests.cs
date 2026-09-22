@@ -4,12 +4,14 @@ using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Text;
 using FiddlerClassic.Host.Mcp;
+using FiddlerClassic.Host.Services;
 using FiddlerClassic.Protocol;
 
 namespace FiddlerClassic.Tests;
 
-public sealed class HttpTransportTests
+public sealed class HttpTransportTests : IDisposable
 {
+    private readonly string _directory = Path.Combine(Path.GetTempPath(), "FiddlerClassicTests", Guid.NewGuid().ToString("N"));
     /// <summary>
     /// Verifies missing and invalid tokens are rejected while an authenticated tool call reaches the bridge.
     /// </summary>
@@ -18,9 +20,14 @@ public sealed class HttpTransportTests
     {
         var port = GetFreePort();
         using var shutdown = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-        var serverTask = McpHost.RunHttpAsync(port, "test-secret", shutdown.Token);
+        var store = new ConfigStore(_directory);
+        var configuration = store.GetOrCreate();
+        configuration.HttpBearerToken = "test-secret";
+        store.Save(configuration);
+        var serverTask = McpHost.RunHttpAsync(port, store, shutdown.Token);
         using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}") };
-
+        try
+        {
         await WaitForServer(client, TestContext.Current.CancellationToken);
 
         using var missing = await SendInitialize(client, null, TestContext.Current.CancellationToken);
@@ -46,8 +53,55 @@ public sealed class HttpTransportTests
         Assert.Equal(Operations.ListSessions, bridgeRequest.Operation);
         Assert.Contains("example.test/http", toolPayload);
 
-        shutdown.Cancel();
-        await serverTask;
+        }
+        finally
+        {
+            shutdown.Cancel();
+            await serverTask;
+        }
+    }
+
+    [Fact]
+    public async Task ForegroundHttpReloadsRotatedAndRevokedCredentials()
+    {
+        var store = new ConfigStore(_directory);
+        var original = store.GetOrCreate().HttpBearerToken;
+        var port = GetFreePort();
+        using var shutdown = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var serverTask = McpHost.RunHttpAsync(port, store, shutdown.Token);
+        using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}") };
+        try
+        {
+            await WaitForServer(client, TestContext.Current.CancellationToken);
+            using var first = await SendInitialize(client, original, TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+            var rotated = store.RotateToken().HttpBearerToken;
+            using var oldToken = await SendInitialize(client, original, TestContext.Current.CancellationToken);
+            using var newToken = await SendInitialize(client, rotated, TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.Unauthorized, oldToken.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, newToken.StatusCode);
+
+            var named = store.AuthorizeClient("Foreground test");
+            using var authorized = await SendInitialize(client, named.Token, TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, authorized.StatusCode);
+            store.DeauthorizeClient(named.Client.ClientId);
+            using var revoked = await SendInitialize(client, named.Token, TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.Unauthorized, revoked.StatusCode);
+            Assert.False(revoked.Headers.Contains("Access-Control-Allow-Origin"));
+        }
+        finally
+        {
+            shutdown.Cancel();
+            await serverTask;
+        }
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_directory))
+        {
+            Directory.Delete(_directory, recursive: true);
+        }
     }
 
     /// <summary>

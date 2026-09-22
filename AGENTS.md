@@ -6,16 +6,18 @@ extension.
 
 ## Project Scope
 
-- Support Windows x64 and Fiddler Classic 5.x. Do not introduce claims of support
+- Support Windows x64 and Fiddler Classic 5.x and 6.x. Do not introduce claims of support
   for Fiddler Everywhere, Fiddler Classic 4.x, or non-Windows capture engines.
 - Keep Fiddler Classic as the capture and traffic-mutation engine. The extension is
   a thin automation bridge; the host provides CLI, MCP, daemon, validation, and
   serialization behavior.
 - Do not launch Fiddler automatically, install a service or MSI, or install,
   generate, or trust certificates.
+- Only explicit `app open` or `app restart` commands may launch Fiddler, using
+  `-noattach`. Close and restart require confirmation and normal window shutdown.
+  Verify the process owner and Windows session; never force-kill or dismiss native dialogs.
 - Do not redistribute `Fiddler.exe` or any Telerik binaries.
-- Treat `PLAN.md` as historical design context. The code, tests, public docs, and
-  this guide define the current implementation.
+- The code, tests, public docs, and this guide define the current implementation.
 
 ## Architecture Boundaries
 
@@ -33,7 +35,7 @@ extension.
 ### `FiddlerClassic.Bridge`
 
 - Keep the bridge on `net462` and compatible with the installed Fiddler Classic
-  5.x extension model.
+  5.x and 6.x extension model.
 - This is the only project that may reference `Fiddler.exe` or directly use
   Fiddler APIs and objects.
 - Marshal every read or mutation of Fiddler UI state, sessions, AutoResponder
@@ -53,8 +55,9 @@ extension.
 
 - Keep the host on `net10.0`. It owns the executable, CLI, daemon, MCP transports,
   installation, configuration, authentication, and host-side export logic.
-- Access Fiddler only through `IBridgeClient`; do not add Fiddler assembly
-  references to the host.
+- Access Fiddler traffic and automation APIs only through `IBridgeClient`; do not
+  add Fiddler assembly references to the host. Explicit application lifecycle
+  commands use Windows process APIs and must remain independent of bridge IPC.
 - Reuse shared client and service behavior across CLI and MCP surfaces. Avoid two
   implementations of the same operation.
 - Preserve cancellation and timeout behavior through every IPC and network layer.
@@ -111,8 +114,9 @@ extension.
   contents, or FARX contents to diagnostics or test logs.
 - Scope named pipes, token files, configuration directories, and bridge deployment
   to the current Windows user.
-- Bind MCP HTTP only to `127.0.0.1`, require the generated bearer token, and do not
-  enable CORS.
+- Keep managed MCP HTTP disabled and bound to `127.0.0.1` by default. Permit IPv4
+  `0.0.0.0` only after explicit plaintext-credential confirmation. Require bearer
+  authentication and do not enable CORS or configure TLS or firewall rules.
 - Keep destructive operations explicitly confirmed. Non-interactive CLI callers
   use `--yes`; MCP callers use the corresponding confirmation argument.
 - Mark MCP tools accurately as read-only, destructive, idempotent, and open-world.

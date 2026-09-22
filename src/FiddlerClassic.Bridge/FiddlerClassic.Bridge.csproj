@@ -18,6 +18,6 @@
     <Reference Include="System.Windows.Forms" />
   </ItemGroup>
   <Target Name="VerifyFiddlerReference" BeforeTargets="ResolveReferences" Condition="!Exists('$(FiddlerInstallDir)\Fiddler.exe')">
-    <Error Text="Fiddler Classic 5.x was not found at '$(FiddlerInstallDir)'. Set FiddlerInstallDir to the directory containing Fiddler.exe." />
+    <Error Text="Fiddler Classic 5.x or 6.x was not found at '$(FiddlerInstallDir)'. Set FiddlerInstallDir to the directory containing Fiddler.exe." />
   </Target>
 </Project>
