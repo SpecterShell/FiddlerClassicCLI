@@ -30,9 +30,9 @@ public sealed class TerminalTabIconTests
                 var header = tabs.GetTabRect(0);
                 var titleBarPixels = 0;
                 for (var y = header.Top; y < header.Bottom; y++)
-                for (var x = header.Left; x < header.Right; x++)
-                    if (rendered.GetPixel(x, y).ToArgb() == Color.FromArgb(0, 140, 149).ToArgb())
-                        titleBarPixels++;
+                    for (var x = header.Left; x < header.Right; x++)
+                        if (rendered.GetPixel(x, y).ToArgb() == Color.FromArgb(0, 140, 149).ToArgb())
+                            titleBarPixels++;
                 Assert.True(titleBarPixels >= 20, "The tab header must render the terminal icon, not just its title.");
                 SaveSnapshot(rendered, $"terminal-tab-{createHandleFirst}.png");
             }
@@ -74,12 +74,12 @@ public sealed class TerminalTabIconTests
         Assert.Equal(Color.White.ToArgb(), icon.GetPixel(10 * size / 16, 11 * size / 16).ToArgb());
         var palette = new[] { Color.White.ToArgb(), Color.FromArgb(31, 45, 61).ToArgb(), Color.FromArgb(0, 140, 149).ToArgb() };
         for (var y = 0; y < size; y++)
-        for (var x = 0; x < size; x++)
-        {
-            var pixel = icon.GetPixel(x, y);
-            Assert.True(pixel.A is 0 or 255, "Pixel edges must not have partial transparency.");
-            if (pixel.A == 255) Assert.Contains(pixel.ToArgb(), palette);
-        }
+            for (var x = 0; x < size; x++)
+            {
+                var pixel = icon.GetPixel(x, y);
+                Assert.True(pixel.A is 0 or 255, "Pixel edges must not have partial transparency.");
+                if (pixel.A == 255) Assert.Contains(pixel.ToArgb(), palette);
+            }
         SaveSnapshot(icon, $"terminal-icon-{size}.png");
     }
 

@@ -89,8 +89,13 @@ internal static class TextPromptDialog
         };
         var layout = new TableLayoutPanel
         {
-            Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, RowCount = rows.Length,
-            Padding = new Padding(12), TabStop = false, TabIndex = 0
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            ColumnCount = 1,
+            RowCount = rows.Length,
+            Padding = new Padding(12),
+            TabStop = false,
+            TabIndex = 0
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         for (var index = 0; index < rows.Length; index++)
@@ -115,8 +120,11 @@ internal static class TextPromptDialog
     {
         var actions = new FlowLayoutPanel
         {
-            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            WrapContents = true, Margin = Padding.Empty, TabStop = false
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = true,
+            Margin = Padding.Empty,
+            TabStop = false
         };
         for (var index = 0; index < buttons.Length; index++)
         {

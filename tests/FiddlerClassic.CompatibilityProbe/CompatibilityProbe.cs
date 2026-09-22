@@ -104,7 +104,10 @@ public sealed class CompatibilityProbe : IFiddlerExtension
         FiddlerApplication.UI.AddImportedSessions(new[] { session });
         var list = await BridgeAsync<ListSessionsResponse>(Operations.ListSessions, new ListSessionsRequest
         {
-            MinId = session.id, MaxId = session.id, UrlContains = url, Limit = 1
+            MinId = session.id,
+            MaxId = session.id,
+            UrlContains = url,
+            Limit = 1
         });
         Check(list.Sessions.Count == 1 && list.Sessions[0].Id == session.id &&
             list.Sessions[0].StatusCode == 200, "bounded session list matches native session");
@@ -165,8 +168,13 @@ public sealed class CompatibilityProbe : IFiddlerExtension
     /// <param name="payload">Synthetic, bounded operation parameters.</param>
     private async Task<T> BridgeAsync<T>(string operation, object payload)
     {
-        var request = new BridgeRequest { ProtocolVersion = ProtocolConstants.Version,
-            RequestId = Guid.NewGuid().ToString("N"), Operation = operation, PayloadJson = _json.Serialize(payload) };
+        var request = new BridgeRequest
+        {
+            ProtocolVersion = ProtocolConstants.Version,
+            RequestId = Guid.NewGuid().ToString("N"),
+            Operation = operation,
+            PayloadJson = _json.Serialize(payload)
+        };
         var response = _json.Deserialize<BridgeResponse>(await ExchangeAsync(PipeNames.ForCurrentUser(), _json.Serialize(request)));
         if (!response.Success || response.RequestId != request.RequestId || response.ProtocolVersion != ProtocolConstants.Version)
             throw new InvalidOperationException("Bridge request failed: " + operation + " (" + response.Error?.Code + ").");

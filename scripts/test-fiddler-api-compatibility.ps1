@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'Reflection-only compatibility checks require Windows .NET Framework.' }
 & "$PSScriptRoot/verify-release.ps1" -ReleaseDirectory $ReleaseDirectory
 $testRoot = (New-Item -ItemType Directory -Path (Join-Path ([IO.Path]::GetTempPath()) (
-    'fiddler-api-compatibility-' + [guid]::NewGuid().ToString('N')))).FullName
+            'fiddler-api-compatibility-' + [guid]::NewGuid().ToString('N')))).FullName
 try {
     $payload = Join-Path $testRoot 'payload'
     Expand-Archive -LiteralPath "$ReleaseDirectory/fiddler-classic-win-x64.zip" -DestinationPath $payload

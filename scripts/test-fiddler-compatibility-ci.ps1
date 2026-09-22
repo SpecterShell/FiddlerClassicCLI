@@ -48,7 +48,7 @@ if (-not (Test-Path -LiteralPath $fiddler) -or
 }
 & "$PSScriptRoot/verify-release.ps1" -ReleaseDirectory $ReleaseDirectory
 $testRoot = (New-Item -ItemType Directory -Path (Join-Path ([IO.Path]::GetTempPath()) (
-    'fiddler-compatibility-' + [guid]::NewGuid().ToString('N')))).FullName
+            'fiddler-compatibility-' + [guid]::NewGuid().ToString('N')))).FullName
 $savedEnvironment = @{}
 $nativeProcess = $null
 $cli = $null
@@ -69,12 +69,12 @@ try {
     if (Test-Path -LiteralPath "$probeOutput/Fiddler.exe") { throw 'Probe output must not copy Telerik binaries.' }
 
     foreach ($entry in @{
-        FIDDLER_CLASSIC_PIPE_NAME = ('compatibility-' + [guid]::NewGuid().ToString('N'))
-        FIDDLER_CLASSIC_DAEMON_PIPE_NAME = ('compatibility-daemon-' + [guid]::NewGuid().ToString('N'))
-        FIDDLER_CLASSIC_COMPATIBILITY_CI = '1'
-        FIDDLER_CLASSIC_COMPATIBILITY_RESULT = "$testRoot/result.json"
-        FIDDLER_CLASSIC_EXPECTED_BRIDGE_SHA256 = $ExpectedBridgeSha256
-    }.GetEnumerator()) {
+            FIDDLER_CLASSIC_PIPE_NAME = ('compatibility-' + [guid]::NewGuid().ToString('N'))
+            FIDDLER_CLASSIC_DAEMON_PIPE_NAME = ('compatibility-daemon-' + [guid]::NewGuid().ToString('N'))
+            FIDDLER_CLASSIC_COMPATIBILITY_CI = '1'
+            FIDDLER_CLASSIC_COMPATIBILITY_RESULT = "$testRoot/result.json"
+            FIDDLER_CLASSIC_EXPECTED_BRIDGE_SHA256 = $ExpectedBridgeSha256
+        }.GetEnumerator()) {
         $savedEnvironment[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, 'Process')
         [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
     }

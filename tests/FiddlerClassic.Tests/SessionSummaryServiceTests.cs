@@ -13,7 +13,11 @@ public sealed class SessionSummaryServiceTests
     {
         var filters = new ListSessionsRequest
         {
-            MinId = 10, MaxId = 99, Host = "example.test", Limit = 4, NewestFirst = false
+            MinId = 10,
+            MaxId = 99,
+            Host = "example.test",
+            Limit = 4,
+            NewestFirst = false
         };
         var response = new ListSessionsResponse
         {

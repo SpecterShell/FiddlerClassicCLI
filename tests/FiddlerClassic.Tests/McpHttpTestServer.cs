@@ -76,7 +76,10 @@ internal sealed class McpHttpTestServer : IAsyncDisposable
         {
             Content = new StringContent(JsonSerializer.Serialize(new
             {
-                jsonrpc = "2.0", id = 1, method, @params = parameters
+                jsonrpc = "2.0",
+                id = 1,
+                method,
+                @params = parameters
             }), Encoding.UTF8, "application/json")
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", TestToken);

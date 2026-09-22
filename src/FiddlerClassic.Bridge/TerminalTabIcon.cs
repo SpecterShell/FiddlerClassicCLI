@@ -62,17 +62,17 @@ internal static class TerminalTabIcon
     {
         var bitmap = new Bitmap(size.Width, size.Height);
         for (var y = 0; y < size.Height; y++)
-        for (var x = 0; x < size.Width; x++)
-        {
-            var color = Pixels[y * 16 / size.Height][x * 16 / size.Width] switch
+            for (var x = 0; x < size.Width; x++)
             {
-                'N' => Background,
-                'T' => TitleBar,
-                'W' => Color.White,
-                _ => Color.Transparent
-            };
-            bitmap.SetPixel(x, y, color);
-        }
+                var color = Pixels[y * 16 / size.Height][x * 16 / size.Width] switch
+                {
+                    'N' => Background,
+                    'T' => TitleBar,
+                    'W' => Color.White,
+                    _ => Color.Transparent
+                };
+                bitmap.SetPixel(x, y, color);
+            }
         return bitmap;
     }
 }

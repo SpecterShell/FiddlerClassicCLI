@@ -8,7 +8,7 @@ param()
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $testRoot = (New-Item -ItemType Directory -Path (Join-Path ([IO.Path]::GetTempPath()) (
-    'fiddler-release-verifier-' + [guid]::NewGuid().ToString('N')))).FullName
+            'fiddler-release-verifier-' + [guid]::NewGuid().ToString('N')))).FullName
 $required = @(
     'fiddler-classic.exe', 'LICENSE', 'install.ps1',
     'bridge/FiddlerClassic.Bridge.dll', 'bridge/FiddlerClassic.Protocol.dll',
@@ -57,8 +57,8 @@ try {
         $index++
     }
     foreach ($unsafe in @('../escape', 'a/../../escape', '/absolute', '\absolute', 'C:/absolute',
-        'C:relative', '//server/share/file', 'a\..\escape', './alias', 'a//alias', 'a/file:stream',
-        'a/file.', 'a/file ', 'NUL.txt', 'a/COM1', "a/control`ncharacter")) {
+            'C:relative', '//server/share/file', 'a\..\escape', './alias', 'a//alias', 'a/file:stream',
+            'a/file.', 'a/file ', 'NUL.txt', 'a/COM1', "a/control`ncharacter")) {
         Test-ArchiveCase -Name "unsafe-$index" -Entries ($required + $unsafe) -ExpectedError 'unsafe Windows path'
         $index++
     }

@@ -28,30 +28,30 @@ public sealed class HttpTransportTests : IDisposable
         using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}") };
         try
         {
-        await WaitForServer(client, TestContext.Current.CancellationToken);
+            await WaitForServer(client, TestContext.Current.CancellationToken);
 
-        using var missing = await SendInitialize(client, null, TestContext.Current.CancellationToken);
-        using var invalid = await SendInitialize(client, "wrong", TestContext.Current.CancellationToken);
-        using var valid = await SendInitialize(client, "test-secret", TestContext.Current.CancellationToken);
+            using var missing = await SendInitialize(client, null, TestContext.Current.CancellationToken);
+            using var invalid = await SendInitialize(client, "wrong", TestContext.Current.CancellationToken);
+            using var valid = await SendInitialize(client, "test-secret", TestContext.Current.CancellationToken);
 
-        Assert.Equal(HttpStatusCode.Unauthorized, missing.StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, invalid.StatusCode);
-        Assert.Equal(HttpStatusCode.OK, valid.StatusCode);
+            Assert.Equal(HttpStatusCode.Unauthorized, missing.StatusCode);
+            Assert.Equal(HttpStatusCode.Unauthorized, invalid.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, valid.StatusCode);
 
-        var pipeTask = FakePipeServer.ServeOnceAsync(request => FakePipeServer.Success(
-            request,
-            new ListSessionsResponse
-            {
-                TotalMatched = 1,
-                Sessions = new List<SessionSummary> { new() { Id = 31, Method = "GET", Url = "https://example.test/http" } }
-            }));
-        using var toolCall = await SendToolCall(client, TestContext.Current.CancellationToken);
-        var toolPayload = await toolCall.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
-        var bridgeRequest = await pipeTask;
+            var pipeTask = FakePipeServer.ServeOnceAsync(request => FakePipeServer.Success(
+                request,
+                new ListSessionsResponse
+                {
+                    TotalMatched = 1,
+                    Sessions = new List<SessionSummary> { new() { Id = 31, Method = "GET", Url = "https://example.test/http" } }
+                }));
+            using var toolCall = await SendToolCall(client, TestContext.Current.CancellationToken);
+            var toolPayload = await toolCall.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+            var bridgeRequest = await pipeTask;
 
-        Assert.Equal(HttpStatusCode.OK, toolCall.StatusCode);
-        Assert.Equal(Operations.ListSessions, bridgeRequest.Operation);
-        Assert.Contains("example.test/http", toolPayload);
+            Assert.Equal(HttpStatusCode.OK, toolCall.StatusCode);
+            Assert.Equal(Operations.ListSessions, bridgeRequest.Operation);
+            Assert.Contains("example.test/http", toolPayload);
 
         }
         finally

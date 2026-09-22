@@ -369,13 +369,19 @@ public sealed class DiagnosticExportServiceTests : IDisposable
 
     private static StatusProbe HealthyStatus() => new(new StatusResponse
     {
-        FiddlerInstalled = true, FiddlerRunning = true, FiddlerVersion = "6.0.0.0",
-        BridgeInstalled = true, BridgeConnected = true, BridgeVersion = "0.3.0.0"
+        FiddlerInstalled = true,
+        FiddlerRunning = true,
+        FiddlerVersion = "6.0.0.0",
+        BridgeInstalled = true,
+        BridgeConnected = true,
+        BridgeVersion = "0.3.0.0"
     }, null, null);
 
     private static DaemonStatus RunningDaemon() => new()
     {
-        Running = true, HostVersion = "0.3.0-preview.1", Capabilities = [DaemonProtocol.ManagedHttpCapability],
+        Running = true,
+        HostVersion = "0.3.0-preview.1",
+        Capabilities = [DaemonProtocol.ManagedHttpCapability],
         HttpService = new HttpServiceStatus { Enabled = true, Running = true }
     };
 

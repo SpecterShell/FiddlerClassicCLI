@@ -18,17 +18,24 @@ public sealed class ReadOnlyFeatureCliTests : IDisposable
     public void SummaryUsesOneListCallAndReportsItsScope(bool json)
     {
         var calls = 0;
-        var bridge = new TestBridgeClient { Handler = (operation, payload) =>
+        var bridge = new TestBridgeClient
+        {
+            Handler = (operation, payload) =>
         {
             Assert.Equal(Operations.ListSessions, operation);
             var request = Assert.IsType<ListSessionsRequest>(payload);
             Assert.Equal(2, request.Limit);
             Assert.Equal("example.test", request.Host);
             calls++;
-            return new ListSessionsResponse { TotalMatched = 3, Sessions =
+            return new ListSessionsResponse
+            {
+                TotalMatched = 3,
+                Sessions =
             [new SessionSummary { Id = 7, Host = "example.test", StatusCode = 200,
-                ResponseBodyBytes = 12, IsComplete = true, DurationMilliseconds = 4 }] };
-        }};
+                ResponseBodyBytes = 12, IsComplete = true, DurationMilliseconds = 4 }]
+            };
+        }
+        };
         var arguments = new List<string> { "sessions", "list", "--summary", "--host", "example.test", "--limit", "2" };
         if (json) arguments.Add("--json");
         var result = Invoke(CreateRoot(bridge), arguments.ToArray());

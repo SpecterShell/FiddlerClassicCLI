@@ -21,7 +21,7 @@ if (-not $FixtureOnly -and ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIR
 }
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $testRoot = (New-Item -ItemType Directory -Path (Join-Path ([IO.Path]::GetTempPath()) (
-    'fiddler-release-install-' + [guid]::NewGuid().ToString('N')))).FullName
+            'fiddler-release-install-' + [guid]::NewGuid().ToString('N')))).FullName
 $installRoot = Join-Path $testRoot 'installed versions'
 $profileRoot = Join-Path $testRoot 'profile'
 $originalUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
@@ -47,17 +47,17 @@ function Invoke-TestInstaller {
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
     foreach ($argument in @('-NoProfile', '-NonInteractive', '-File', $Installer,
-        '-InstallRoot', $installRoot, '-NoPathUpdate')) { $start.ArgumentList.Add($argument) }
+            '-InstallRoot', $installRoot, '-NoPathUpdate')) { $start.ArgumentList.Add($argument) }
     if ($Package) {
         $start.ArgumentList.Add('-PackagePath')
         $start.ArgumentList.Add($Package)
     }
     foreach ($entry in @{
-        USERPROFILE = $profileRoot; LOCALAPPDATA = "$profileRoot/Local"; APPDATA = "$profileRoot/Roaming"
-        TEMP = "$profileRoot/Temp"; TMP = "$profileRoot/Temp"
-        FIDDLER_CLASSIC_PIPE_NAME = ('installer-' + [guid]::NewGuid().ToString('N'))
-        FIDDLER_CLASSIC_DAEMON_PIPE_NAME = ('installer-daemon-' + [guid]::NewGuid().ToString('N'))
-    }.GetEnumerator()) { $start.Environment[$entry.Key] = $entry.Value }
+            USERPROFILE = $profileRoot; LOCALAPPDATA = "$profileRoot/Local"; APPDATA = "$profileRoot/Roaming"
+            TEMP = "$profileRoot/Temp"; TMP = "$profileRoot/Temp"
+            FIDDLER_CLASSIC_PIPE_NAME = ('installer-' + [guid]::NewGuid().ToString('N'))
+            FIDDLER_CLASSIC_DAEMON_PIPE_NAME = ('installer-daemon-' + [guid]::NewGuid().ToString('N'))
+        }.GetEnumerator()) { $start.Environment[$entry.Key] = $entry.Value }
     $process = [Diagnostics.Process]::Start($start)
     try {
         $output = $process.StandardOutput.ReadToEndAsync()

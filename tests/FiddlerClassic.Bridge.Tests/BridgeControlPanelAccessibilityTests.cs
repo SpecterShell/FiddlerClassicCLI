@@ -180,8 +180,11 @@ public sealed partial class BridgeControlPanelTests
 
     private static HttpServiceStatus AllInterfaceStatus() => new HttpServiceStatus
     {
-        BindMode = HttpBindModes.All, BindAddress = "0.0.0.0", Port = 9101,
-        Endpoint = "http://0.0.0.0:9101/mcp", LoopbackEndpoint = "http://127.0.0.1:9101/mcp",
+        BindMode = HttpBindModes.All,
+        BindAddress = "0.0.0.0",
+        Port = 9101,
+        Endpoint = "http://0.0.0.0:9101/mcp",
+        LoopbackEndpoint = "http://127.0.0.1:9101/mcp",
         LanEndpoints = new[] { "http://192.168.1.4:9101/mcp", "http://10.0.0.4:9101/mcp" }
     };
 }

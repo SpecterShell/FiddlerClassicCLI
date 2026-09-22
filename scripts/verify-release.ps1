@@ -53,9 +53,9 @@ try {
         if ([string]::IsNullOrWhiteSpace($name) -or $name.StartsWith('/') -or
             $name -match '[\x00-\x1f\x7f<>:"|?*]' -or
             @($parts | Where-Object {
-                $_ -in @('', '.', '..') -or $_ -match '[. ]$' -or
-                $_ -match '^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)'
-            }).Count -ne 0) {
+                    $_ -in @('', '.', '..') -or $_ -match '[. ]$' -or
+                    $_ -match '^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)'
+                }).Count -ne 0) {
             throw "Release archive contains an unsafe Windows path."
         }
 

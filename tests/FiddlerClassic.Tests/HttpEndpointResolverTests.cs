@@ -16,8 +16,12 @@ public sealed class HttpEndpointResolverTests
     {
         var original = new HttpServiceStatus
         {
-            BindMode = mode, BindAddress = address, Port = 9101,
-            Endpoint = $"http://{address}:9101/mcp", Enabled = true, Running = true
+            BindMode = mode,
+            BindAddress = address,
+            Port = 9101,
+            Endpoint = $"http://{address}:9101/mcp",
+            Enabled = true,
+            Running = true
         };
         var readCount = 0;
         var status = HttpEndpointResolver.Populate(original, () =>
