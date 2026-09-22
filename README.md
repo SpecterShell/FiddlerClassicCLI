@@ -249,21 +249,6 @@ dotnet publish ./src/FiddlerClassic.Host/FiddlerClassic.Host.csproj -c Release -
 
 If Fiddler is installed elsewhere, pass `-p:FiddlerInstallDir="C:\path\to\Fiddler"`.
 
-The [Build and Release workflow](.github/workflows/build-release.yml) runs on pull requests, pushes to `main`, version tags, and manual dispatches. It installs the pinned Fiddler Classic compile reference on a `windows-2025` runner, trying WinGet first and Chocolatey if WinGet is unavailable or unsuccessful. It then runs all automated tests, creates the self-contained package, verifies its checksum and required contents, and uploads the two release assets. A tag matching `v*` publishes the tested assets as a GitHub release; tags containing a prerelease suffix such as `v0.3.0-preview.1` create a prerelease.
-
-Release checks cover archive rejection rules, temporary installation, reinstallation and upgrades, and direct API metadata compatibility of the same distributed bridge DLL with Fiddler `5.0.20253.3311` and `6.0.20261.7291`. The manual `run_fiddler_compatibility` option also runs native UI checks on disposable runners, including startup with the tab hidden and cleanup on unload. See the [installation guide](docs/en-US/installation.md#github-actions) for details of the checks that require explicit opt-in. Release artifacts exclude Telerik binaries, native profiles, and test probes.
-
-Automated tests use a fake named-pipe peer and exercise both MCP transports. Real Fiddler tests are opt-in:
-
-| Environment variable | Coverage |
-| --- | --- |
-| `FIDDLER_CLASSIC_INTEGRATION=1` | Status, compose, capture inspection, large/binary body chunks, SAZ save, replay |
-| `FIDDLER_CLASSIC_AUTOMATION_INTEGRATION=1` | AutoResponder backup/restore, FARX replacement, request/response breakpoint mutation, automatic resume |
-| `FIDDLER_CLASSIC_DESTRUCTIVE_INTEGRATION=1` | Clear and SAZ restore |
-| `FIDDLER_CLASSIC_PROXY_INTEGRATION=1` | System proxy attach/detach with original-state restoration |
-
-Run opt-in tests only in a controlled Fiddler profile. The automation test temporarily replaces and restores the AutoResponder rule list and sends loopback traffic through live breakpoints. The destructive test backs up and restores the session list and modifies active capture evidence during the test.
-
 ## License
 
 Copyright 2026 SpecterShell. Licensed under the [Apache License 2.0](LICENSE).

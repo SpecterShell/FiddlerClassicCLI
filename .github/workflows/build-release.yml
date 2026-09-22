@@ -67,6 +67,10 @@ jobs:
         shell: pwsh
         run: ./scripts/test-release-verifier.ps1
 
+      - name: Test release publication without GitHub writes
+        shell: pwsh
+        run: ./scripts/test-release-publication.ps1
+
       - name: Test temporary install, same-version reinstall, and upgrade
         shell: pwsh
         run: ./scripts/test-release-install.ps1
@@ -172,32 +176,13 @@ jobs:
           name: fiddler-classic-release
           path: artifacts/release
 
-      - name: Verify downloaded release package
+      - name: Test release publication on the publishing platform
         shell: pwsh
-        run: ./scripts/verify-release.ps1
+        run: ./scripts/test-release-publication.ps1
 
-      - name: Create GitHub release
+      - name: Publish verified release assets
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $arguments = @(
-              "release",
-              "create",
-              $env:GITHUB_REF_NAME,
-              "artifacts/release/fiddler-classic-win-x64.zip",
-              "artifacts/release/SHA256SUMS",
-              "--verify-tag",
-              "--generate-notes",
-              "--title",
-              $env:GITHUB_REF_NAME
-          )
-
-          if ($env:GITHUB_REF_NAME.Contains("-")) {
-              $arguments += "--prerelease"
-          }
-
-          & gh @arguments
-          if ($LASTEXITCODE -ne 0) {
-              throw "GitHub release creation failed with exit code $LASTEXITCODE."
-          }
+          ./scripts/publish-release.ps1 -Tag $env:GITHUB_REF_NAME -Repository $env:GITHUB_REPOSITORY

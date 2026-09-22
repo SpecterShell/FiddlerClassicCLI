@@ -114,7 +114,9 @@ The build job performs these steps:
 
 The build job runs for pull requests, pushes to `main`, tags matching `v*`, and manual dispatches. Its token has read-only repository access.
 
-For a version tag, the release job downloads the artifact produced by that same build, verifies it again, and creates a GitHub release using the workflow's `GITHUB_TOKEN` with `contents: write`. Stable tags use the form `v0.3.0`; a suffix such as `v0.3.0-preview.1` marks the release as a prerelease. The workflow verifies that the tag already exists and does not replace assets in an existing release.
+For a version tag, the release job downloads the artifact produced by that same build and runs `scripts/publish-release.ps1` using the workflow's `GITHUB_TOKEN` with `contents: write`. The script verifies the package before contacting GitHub. If the release already exists, it preserves its title, notes, draft status, and prerelease setting and uploads only missing assets. Otherwise, it creates a release after verifying that the tag exists. Stable tags use the form `v0.3.0`; a suffix such as `v0.3.0-preview.1` marks a newly created release as a prerelease.
+
+On a rerun, existing assets must have an uploaded state and a SHA-256 digest matching the local files. The script stops before uploading if an asset differs or lacks a verifiable digest. It never replaces existing files, and immutable releases must already contain both matching assets. Authentication and connection failures stop publication. `scripts/test-release-publication.ps1` checks these decisions with a fake GitHub CLI and a local package on both workflow platforms, without making GitHub requests.
 
 Every workflow runs a metadata-only compatibility matrix against `5.0.20253.3311` and `6.0.20261.7291`. Each runner downloads the same release ZIP, checks its bridge hash, and resolves direct API references without executing Fiddler code. Both matrix jobs must pass before publication. This check does not verify native binding policy, reflection-by-name behavior, or UI correctness.
 

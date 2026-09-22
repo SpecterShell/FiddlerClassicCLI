@@ -249,21 +249,6 @@ dotnet publish ./src/FiddlerClassic.Host/FiddlerClassic.Host.csproj -c Release -
 
 如果 Fiddler 安装在其他目录，请传递 `-p:FiddlerInstallDir="C:\path\to\Fiddler"`。
 
-[构建与发布工作流](.github/workflows/build-release.yml)会在拉取请求、推送到 `main`、版本标签和手动触发时运行。它会在 `windows-2025` 运行器上安装固定版本的 Fiddler Classic 编译引用，优先使用 WinGet，并在 WinGet 不可用或安装失败时改用 Chocolatey。随后，工作流会执行全部自动化测试，创建自包含发布包，验证校验值和必要文件，并上传两个发布文件。匹配 `v*` 的标签会将已测试文件发布为 GitHub Release；带有预发布后缀的标签（例如 `v0.3.0-preview.1`）会创建预发布版本。
-
-发布检查覆盖归档拒绝规则、临时安装、同版本重装和并存升级，并验证同一个发布桥接 DLL 与 Fiddler `5.0.20253.3311` 和 `6.0.20261.7291` 的直接 API 元数据兼容性。手动启用 `run_fiddler_compatibility` 后，一次性运行器还会执行原生 UI 检查，包括未选中标签页时的启动行为和卸载时的清理。哪些检查需要显式启用，见[安装指南](docs/zh-CN/installation.md#github-actions)。发布产物不包含 Telerik 二进制文件、原生用户配置或测试探针。
-
-自动化测试使用模拟命名管道对端，并覆盖两种 MCP 传输。真实 Fiddler 测试需要显式启用：
-
-| 环境变量 | 覆盖范围 |
-| --- | --- |
-| `FIDDLER_CLASSIC_INTEGRATION=1` | 状态、构造请求、抓包检查、大型/二进制正文分块、保存 SAZ、重放 |
-| `FIDDLER_CLASSIC_AUTOMATION_INTEGRATION=1` | AutoResponder 备份/恢复、FARX 替换、请求/响应断点修改、自动继续 |
-| `FIDDLER_CLASSIC_DESTRUCTIVE_INTEGRATION=1` | 清空和恢复 SAZ |
-| `FIDDLER_CLASSIC_PROXY_INTEGRATION=1` | 挂接/取消系统代理，并恢复原始状态 |
-
-需要显式启用的测试只应在受控的 Fiddler 配置中运行。自动化测试会暂时替换并恢复 AutoResponder 规则列表，并通过实时断点发送回环流量。破坏性测试会备份并恢复会话列表，测试期间会修改当前抓包证据。
-
 ## 许可证
 
 Copyright 2026 SpecterShell。本项目采用 [Apache License 2.0](LICENSE) 许可证。

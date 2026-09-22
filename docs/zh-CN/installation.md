@@ -114,7 +114,9 @@ $cliPath = (& $installerPath -PackagePath $trustedPackagePath | Select-Object -L
 
 构建任务会在拉取请求、推送到 `main`、匹配 `v*` 的标签和手动触发时运行。其令牌只有仓库只读权限。
 
-版本标签触发的发布任务会下载同一次构建产生的产物，再次验证，并使用具有 `contents: write` 权限的工作流 `GITHUB_TOKEN` 创建 GitHub Release。稳定标签使用 `v0.3.0` 格式；带有后缀的标签（如 `v0.3.0-preview.1`）会将 Release 标记为预发布版本。工作流会验证标签已经存在，且不会替换现有 Release 中的文件。
+版本标签触发的发布任务会下载同一次构建产生的产物，并使用具有 `contents: write` 权限的工作流 `GITHUB_TOKEN` 运行 `scripts/publish-release.ps1`。脚本会先验证发布包，再访问 GitHub。Release 已存在时，脚本保留其标题、说明、草稿状态和预发布设置，只上传缺失的文件；尚不存在时，脚本会确认标签已经存在，再创建 Release。稳定标签使用 `v0.3.0` 格式；带有后缀的标签（如 `v0.3.0-preview.1`）会将新建的 Release 标记为预发布版本。
+
+重新运行时，已有文件必须处于已上传状态，且 SHA-256 摘要与本地文件一致。文件不一致或缺少可验证的摘要时，脚本会在上传前停止。脚本不会替换已有文件；不可变的 Release 必须已经包含两个匹配的文件。身份验证或连接失败也会中止发布。`scripts/test-release-publication.ps1` 使用模拟的 GitHub CLI 和本地发布包，在工作流的两个平台上检查这些处理分支，不会向 GitHub 发送请求。
 
 每次工作流都会针对 `5.0.20253.3311` 和 `6.0.20261.7291` 执行仅检查元数据的兼容性矩阵。各运行器下载同一个发布 ZIP，校验桥接哈希，并在不执行 Fiddler 代码的情况下解析直接 API 引用。两个矩阵任务均通过后才能发布 Release。此检查不验证原生绑定策略、按名称反射的行为或 UI 正确性。
 
