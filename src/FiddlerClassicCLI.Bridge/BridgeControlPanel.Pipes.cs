@@ -8,64 +8,55 @@ namespace FiddlerClassicCLI.Bridge;
 internal sealed partial class BridgeControlPanel
 {
     private readonly Func<BridgePipeStatus> _bridgeStatus;
-    private readonly Label _bridgePipePath = PipeLabel("Bridge pipe path");
+    private readonly SelectableAddress _bridgePipePath = new SelectableAddress { AccessibleName = "Bridge pipe path" };
     private readonly Label _bridgePipeState = PipeLabel("Bridge listener status");
     private readonly Label _bridgePipeError = PipeLabel("Bridge listener error");
-    private readonly Label _daemonPipePath = PipeLabel("Daemon pipe path");
+    private readonly SelectableAddress _daemonPipePath = new SelectableAddress { AccessibleName = "Daemon pipe path" };
     private readonly Label _daemonPipeState = PipeLabel("Daemon pipe status", "Not checked");
     private readonly Label _daemonPipeError = PipeLabel("Daemon pipe error");
     private readonly Label _daemonProcessId = PipeLabel("Daemon process ID", "Unknown");
-    private readonly Label _daemonStartedAt = PipeLabel("Daemon start time UTC", "Unknown");
-    private readonly Button _copyBridgePipe = new Button
+    private readonly ClipboardButton _copyBridgePipe = new ClipboardButton
     {
         Text = "Copy bridge p&ipe", AutoSize = true, AccessibleName = "Copy bridge pipe path"
     };
-    private readonly Button _copyDaemonPipe = new Button
+    private readonly ClipboardButton _copyDaemonPipe = new ClipboardButton
     {
         Text = "Copy &daemon pipe", AutoSize = true, AccessibleName = "Copy daemon pipe path"
     };
-    private readonly Button _refreshPipes = new Button
+    private readonly Button _refreshPipes = new PanelButton
     {
         Text = "Refresh pipe&s", AutoSize = true, AccessibleName = "Refresh named pipes"
     };
 
     /// <summary>Builds a width-constrained diagnostics section with wrapping text and copy actions.</summary>
-    private GroupBox CreatePipesGroup()
+    private TableLayoutPanel CreatePipesLayout()
     {
-        var layout = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2 };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, AccessibleName = "Named pipes" };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         AddRow(layout, "Bridge", _bridgePipeState);
-        AddFullRow(layout, _bridgePipePath);
+        AddFullRow(layout, new EndpointRow(_bridgePipePath, _copyBridgePipe));
         _bridgePipeError.ForeColor = Color.DarkRed;
-        AddFullRow(layout, _bridgePipeError);
+        AddMessageRow(layout, _bridgePipeError);
         AddRow(layout, "Daemon", _daemonPipeState);
-        AddFullRow(layout, _daemonPipePath);
+        AddFullRow(layout, new EndpointRow(_daemonPipePath, _copyDaemonPipe));
         _daemonPipeError.ForeColor = Color.DarkRed;
-        AddFullRow(layout, _daemonPipeError);
+        AddMessageRow(layout, _daemonPipeError);
         AddRow(layout, "PID", _daemonProcessId);
-        AddFullRow(layout, PipeLabel("Daemon start time caption", "Started (UTC)"));
-        AddFullRow(layout, _daemonStartedAt);
         AddRow(layout, "Protocols", PipeLabel("Named pipe protocol versions",
             $"Bridge v{ProtocolConstants.Version}, daemon v{DaemonProtocol.Version}"));
         AddRow(layout, "Access", PipeLabel("Named pipe access restrictions", "Current Windows user only"));
-        AddFullRow(layout, CreateActions(_copyBridgePipe, _copyDaemonPipe, _refreshPipes));
-        return new ContentGroupBox("Named pipes", layout) { AccessibleName = "Named pipes", TabStop = false };
+        AddFullRow(layout, PanelStyle.CreateActions(_refreshPipes));
+        return layout;
     }
 
     private void InitializePipeDiagnostics()
     {
         SetPipePath(_daemonPipePath, _copyDaemonPipe, _client.PipeName);
         UpdateBridgePipeStatus();
-        foreach (var button in new[] { _copyBridgePipe, _copyDaemonPipe })
-        {
-            button.Click += (_, _) =>
-            {
-                if (!string.IsNullOrEmpty(button.AccessibleDescription))
-                    Clipboard.SetText(button.AccessibleDescription);
-            };
-        }
-        _refreshPipes.Click += async (_, _) => await RunOperationAsync(async () =>
+        _copyBridgePipe.GetCopyText = () => _copyBridgePipe.AccessibleDescription;
+        _copyDaemonPipe.GetCopyText = () => _copyDaemonPipe.AccessibleDescription;
+        _refreshPipes.Click += async (_, _) => await RefreshAsync(async () =>
         {
             await RefreshPipeStatusAsync();
         }, showErrors: false);
@@ -83,8 +74,6 @@ internal sealed partial class BridgeControlPanel
             _daemonPipeState.Text = daemon.Running ? "Responding" : "Stopped (reported)";
             _daemonPipeError.Text = string.Empty;
             _daemonProcessId.Text = daemon.Running && daemon.ProcessId > 0 ? daemon.ProcessId.ToString() : "Unknown";
-            _daemonStartedAt.Text = daemon.Running && !string.IsNullOrWhiteSpace(daemon.StartedAtUtc)
-                ? daemon.StartedAtUtc : "Unknown";
             return daemon;
         }
         catch (Exception) when (_lifetime.IsCancellationRequested)
@@ -97,7 +86,6 @@ internal sealed partial class BridgeControlPanel
                 ? "Timed out (state unknown)" : "Unavailable (state unknown)";
             _daemonPipeError.Text = exception.Message;
             _daemonProcessId.Text = "Unknown";
-            _daemonStartedAt.Text = "Unknown";
             return null;
         }
     }
@@ -110,10 +98,10 @@ internal sealed partial class BridgeControlPanel
         _bridgePipeError.Text = status.Error ?? string.Empty;
     }
 
-    private static void SetPipePath(Label label, Button copy, string name)
+    private static void SetPipePath(SelectableAddress address, Button copy, string name)
     {
         var path = string.IsNullOrWhiteSpace(name) ? string.Empty : @"\\.\pipe\" + name;
-        label.Text = path.Length == 0 ? "Unavailable" : path;
+        address.Text = path.Length == 0 ? "Unavailable" : path;
         copy.AccessibleDescription = path;
         copy.Enabled = path.Length != 0;
     }

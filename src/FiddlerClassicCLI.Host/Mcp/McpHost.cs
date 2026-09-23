@@ -1,7 +1,8 @@
-// Configures MCP stdio and reusable authenticated HTTP transports.
+// Configures MCP stdio and reusable HTTP transports with explicit access policies.
 using System.Net;
 using FiddlerClassicCLI.Host.Bridge;
 using FiddlerClassicCLI.Host.Services;
+using FiddlerClassicCLI.Protocol;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
@@ -41,22 +42,57 @@ internal static class McpHost
         await server.WaitForShutdownAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    internal static async Task<ManagedHttpServer> StartHttpAsync(
+    internal static Task<ManagedHttpServer> StartHttpAsync(
         IPAddress address,
         int port,
         IHttpCredentialProvider credentialProvider,
         HttpConnectionRegistry connections,
         CancellationToken cancellationToken)
     {
+        return StartHttpAsync([address], port, credentialProvider, connections, cancellationToken);
+    }
+
+    /// <summary>Starts one HTTP service across all bindings, disposing every listener if startup fails.</summary>
+    /// <param name="addresses">Local addresses to bind on the same port.</param>
+    /// <param name="port">The validated TCP port shared by every endpoint.</param>
+    /// <param name="credentialProvider">Credentials used only when authentication is required.</param>
+    /// <param name="connections">Tracks native transports across all endpoints.</param>
+    /// <param name="cancellationToken">Cancels startup.</param>
+    /// <param name="authenticationMode">Selects required, non-loopback, or anonymous access.</param>
+    /// <returns>The running service, owned by the caller.</returns>
+    internal static async Task<ManagedHttpServer> StartHttpAsync(
+        IReadOnlyList<IPAddress> addresses,
+        int port,
+        IHttpCredentialProvider credentialProvider,
+        HttpConnectionRegistry connections,
+        CancellationToken cancellationToken,
+        string authenticationMode = HttpAuthenticationModes.Required)
+    {
+        ArgumentNullException.ThrowIfNull(addresses);
+        ArgumentNullException.ThrowIfNull(credentialProvider);
+        ArgumentNullException.ThrowIfNull(connections);
+        if (!HttpAuthenticationModes.IsValid(authenticationMode))
+            throw new ArgumentException("Unsupported HTTP authentication mode.", nameof(authenticationMode));
+        var bindings = addresses.ToArray();
+        if (bindings.Length == 0 || bindings.Any(address => address is null))
+        {
+            throw new ArgumentException("At least one local IP address is required.", nameof(addresses));
+        }
         ConfigStore.ValidatePort(port);
         var builder = WebApplication.CreateBuilder();
         ConfigureLogging(builder.Logging);
+        // Framework request diagnostics may include URLs, headers, or tool arguments.
+        builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.None);
+        builder.Logging.AddFilter("ModelContextProtocol", LogLevel.None);
         builder.WebHost.ConfigureKestrel(options =>
         {
-            options.Listen(address, port, listenOptions =>
+            foreach (var address in bindings)
             {
-                listenOptions.Use(next => context => connections.TrackAsync(context, next));
-            });
+                options.Listen(address, port, listenOptions =>
+                {
+                    listenOptions.Use(next => context => connections.TrackAsync(context, next));
+                });
+            }
         });
         RegisterServices(builder.Services);
         builder.Services
@@ -68,40 +104,8 @@ internal static class McpHost
             .WithTools<BreakpointTools>();
 
         var app = builder.Build();
-        app.Use(async (context, next) =>
-        {
-            if (!context.Request.Path.StartsWithSegments("/mcp"))
-            {
-                await next(context).ConfigureAwait(false);
-                return;
-            }
-
-            var identity = credentialProvider.Authenticate(context.Request.Headers.Authorization.ToString());
-            connections.BeginRequest(context.Connection.Id, identity);
-            try
-            {
-                // No browser origins are authorized. Reject even opaque or malformed origins.
-                // Absent CORS response headers alone do not prevent browser-initiated requests.
-                if (context.Request.Headers.ContainsKey("Origin"))
-                {
-                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                    return;
-                }
-
-                if (identity is null)
-                {
-                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                    context.Response.Headers.WWWAuthenticate = "Bearer";
-                    return;
-                }
-
-                await next(context).ConfigureAwait(false);
-            }
-            finally
-            {
-                connections.EndRequest(context.Connection.Id);
-            }
-        });
+        app.Use((context, next) => HttpAccessPolicy.InvokeAsync(
+            context, next, authenticationMode, credentialProvider, connections));
         app.MapMcp("/mcp");
 
         try
@@ -176,7 +180,13 @@ internal sealed class ManagedHttpServer : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await StopAsync().ConfigureAwait(false);
-        await _application.DisposeAsync().ConfigureAwait(false);
+        try
+        {
+            await StopAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            await _application.DisposeAsync().ConfigureAwait(false);
+        }
     }
 }

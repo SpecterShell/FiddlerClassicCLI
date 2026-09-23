@@ -14,23 +14,26 @@ public sealed partial class BridgeControlPanelTests
         var client = new FakeHostControlClient { PipeName = "custom-daemon", Daemon = RunningDaemon() };
         using var panel = new BridgeControlPanel(client, bridgeStatus: () =>
             new BridgePipeStatus("custom-bridge", BridgeListenerState.Listening));
-        Assert.Equal(@"\\.\pipe\custom-bridge", Named<Label>(panel, "Bridge pipe path").Text);
-        Assert.Equal(@"\\.\pipe\custom-daemon", Named<Label>(panel, "Daemon pipe path").Text);
+        Assert.Equal(@"\\.\pipe\custom-bridge", Named<SelectableAddress>(panel, "Bridge pipe path").Text);
+        Assert.Equal(@"\\.\pipe\custom-daemon", Named<SelectableAddress>(panel, "Daemon pipe path").Text);
         Assert.Equal(@"\\.\pipe\custom-bridge", Named<Button>(panel, "Copy bridge pipe path").AccessibleDescription);
         Assert.Equal(@"\\.\pipe\custom-daemon", Named<Button>(panel, "Copy daemon pipe path").AccessibleDescription);
         Assert.Equal("Not checked", Named<Label>(panel, "Daemon pipe status").Text);
 
+        SelectTab(panel, "Named pipes");
+        var previousDaemonReads = client.DaemonStatusCount;
+        var previousServiceReads = client.ServiceStatusCount;
         Named<Button>(panel, "Refresh named pipes").PerformClick();
         PumpUntilIdle(panel);
         Assert.Equal("Listening", Named<Label>(panel, "Bridge listener status").Text);
         Assert.Equal("Responding", Named<Label>(panel, "Daemon pipe status").Text);
         Assert.Equal("1234", Named<Label>(panel, "Daemon process ID").Text);
-        Assert.Equal(client.Daemon.StartedAtUtc, Named<Label>(panel, "Daemon start time UTC").Text);
+        Assert.DoesNotContain(Descendants(panel).OfType<Label>(), label => label.AccessibleName == "Daemon start time UTC");
         Assert.Equal($"Bridge v{ProtocolConstants.Version}, daemon v{DaemonProtocol.Version}",
             Named<Label>(panel, "Named pipe protocol versions").Text);
         Assert.Equal("Current Windows user only", Named<Label>(panel, "Named pipe access restrictions").Text);
-        Assert.Equal(1, client.DaemonStatusCount);
-        Assert.Equal(0, client.ServiceStatusCount);
+        Assert.Equal(previousDaemonReads + 1, client.DaemonStatusCount);
+        Assert.Equal(previousServiceReads, client.ServiceStatusCount);
         Assert.Equal(0, client.StartCount);
     });
 
@@ -50,7 +53,6 @@ public sealed partial class BridgeControlPanelTests
         Assert.Equal(timeout ? "Timed out (state unknown)" : "Unavailable (state unknown)",
             Named<Label>(panel, "Daemon pipe status").Text);
         Assert.Equal("Unknown", Named<Label>(panel, "Daemon process ID").Text);
-        Assert.Equal("Unknown", Named<Label>(panel, "Daemon start time UTC").Text);
         Assert.Equal(client.DaemonFailure.Message, Named<Label>(panel, "Daemon pipe error").Text);
         Assert.Contains("Running daemon: unavailable", panel.VersionText);
         Assert.True(Named<Button>(panel, "Copy daemon pipe path").Enabled);
@@ -63,7 +65,6 @@ public sealed partial class BridgeControlPanelTests
         CompleteRefresh(panel);
         Assert.Equal("Responding", Named<Label>(panel, "Daemon pipe status").Text);
         Assert.Equal("5678", Named<Label>(panel, "Daemon process ID").Text);
-        Assert.Equal(client.Daemon.StartedAtUtc, Named<Label>(panel, "Daemon start time UTC").Text);
         Assert.Empty(Named<Label>(panel, "Daemon pipe error").Text);
     });
 
@@ -93,7 +94,7 @@ public sealed partial class BridgeControlPanelTests
     public void MissingBridgeDoesNotOfferAnUnconfirmedEndpoint() => RunOnSta(() =>
     {
         using var panel = new BridgeControlPanel(new FakeHostControlClient());
-        Assert.Equal("Unavailable", Named<Label>(panel, "Bridge pipe path").Text);
+        Assert.Equal("Unavailable", Named<SelectableAddress>(panel, "Bridge pipe path").Text);
         Assert.False(Named<Button>(panel, "Copy bridge pipe path").Enabled);
         Assert.Equal(string.Empty, Named<Button>(panel, "Copy bridge pipe path").AccessibleDescription);
     });
@@ -113,10 +114,26 @@ public sealed partial class BridgeControlPanelTests
         {
             panel.Size = new Size(width, 1000);
             panel.PerformLayout();
+            SelectTab(panel, "Named pipes");
             Application.DoEvents();
             AssertContentFits(panel);
-            var group = Named<GroupBox>(panel, "Named pipes");
-            Assert.True(Named<GroupBox>(panel, "Versions").Top >= group.Bottom);
+            var group = Named<TableLayoutPanel>(panel, "Named pipes");
+            Assert.Empty(Descendants(Named<TabPage>(panel, "Named pipes")).OfType<GroupBox>());
+            var rows = Descendants(group).OfType<EndpointRow>().ToArray();
+            Assert.Equal(2, rows.Length);
+            foreach (var row in rows)
+            {
+                var label = Assert.Single(row.Controls.OfType<SelectableAddress>());
+                var copy = Assert.Single(row.Controls.OfType<ClipboardButton>());
+                Assert.InRange(copy.Left - label.Right, 0, 12);
+                Assert.True(copy.Top < label.Bottom && label.Top < copy.Bottom);
+                Assert.True(row.ClientRectangle.Contains(copy.Bounds));
+                Assert.Equal(label.Text, copy.GetCopyText!());
+                Assert.NotNull(copy.Image);
+            }
+            Assert.Contains(group, Descendants(Named<TabPage>(panel, "Named pipes")));
+            Assert.DoesNotContain(Named<GroupBox>(panel, "Versions"), Descendants(Named<TabPage>(panel, "Named pipes")));
+            SaveLayoutSnapshot(group, $"pipes-{fontSize}-{width}");
         }
     });
 

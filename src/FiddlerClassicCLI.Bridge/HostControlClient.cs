@@ -6,14 +6,21 @@ using FiddlerClassicCLI.Protocol;
 
 namespace FiddlerClassicCLI.Bridge;
 
+internal enum HostStartResult
+{
+    Started,
+    Reused
+}
+
 internal interface IHostControlClient
 {
     string PipeName { get; }
     HostLaunchRecord? ReadLaunchRecord();
-    Task<DaemonStatus> EnsureStartedAsync(CancellationToken cancellationToken);
+    Task<HostStartResult> EnsureStartedAsync(CancellationToken cancellationToken);
     Task<DaemonStatus> GetDaemonStatusAsync(CancellationToken cancellationToken);
     Task<HttpServiceStatus> GetServiceStatusAsync(CancellationToken cancellationToken);
-    Task<HttpServiceStatus> ConfigureServiceAsync(string bindMode, int port, CancellationToken cancellationToken);
+    Task<HttpServiceStatus> ConfigureServiceAsync(ConfigureHttpServiceRequest request, CancellationToken cancellationToken);
+    Task<HttpServiceStatus> ApplyStartupAsync(CancellationToken cancellationToken);
     Task<HttpServiceStatus> EnableServiceAsync(bool confirm, CancellationToken cancellationToken);
     Task<HttpServiceStatus> DisableServiceAsync(bool confirm, CancellationToken cancellationToken);
     Task<ListHttpClientsResponse> ListClientsAsync(CancellationToken cancellationToken);
@@ -71,7 +78,8 @@ internal sealed class HostControlClient : IHostControlClient
 
     /// <summary>Discovers or starts the daemon off the UI thread within ten seconds.</summary>
     /// <param name="cancellationToken">Cancels startup and all discovery requests on extension unload.</param>
-    public async Task<DaemonStatus> EnsureStartedAsync(CancellationToken cancellationToken)
+    /// <returns>Whether the daemon was already available or a startup request was needed.</returns>
+    public async Task<HostStartResult> EnsureStartedAsync(CancellationToken cancellationToken)
     {
         using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
         {
@@ -87,14 +95,14 @@ internal sealed class HostControlClient : IHostControlClient
         }
     }
 
-    private async Task<DaemonStatus> EnsureStartedCoreAsync(CancellationToken cancellationToken)
+    private async Task<HostStartResult> EnsureStartedCoreAsync(CancellationToken cancellationToken)
     {
         var launch = RequireLaunchRecord(ReadLaunchRecord());
         var existing = await TryGetDaemonStatusAsync(cancellationToken).ConfigureAwait(false);
         if (existing is not null)
         {
             EnsureCapability(existing);
-            return existing;
+            return HostStartResult.Reused;
         }
 
         var startInfo = new ProcessStartInfo
@@ -121,7 +129,7 @@ internal sealed class HostControlClient : IHostControlClient
             if (status is not null)
             {
                 EnsureCapability(status);
-                return status;
+                return HostStartResult.Started;
             }
 
             await Task.Delay(100, cancellationToken).ConfigureAwait(false);
@@ -130,12 +138,12 @@ internal sealed class HostControlClient : IHostControlClient
         throw new TimeoutException("Timed out starting the Fiddler Classic CLI daemon.");
     }
 
-    public Task<HttpServiceStatus> GetServiceStatusAsync(CancellationToken cancellationToken)
+    public async Task<HttpServiceStatus> GetServiceStatusAsync(CancellationToken cancellationToken)
     {
-        return SendAsync<EmptyRequest, HttpServiceStatus>(
-            DaemonProtocol.HttpServiceStatus,
-            new EmptyRequest(),
-            cancellationToken);
+        var status = await GetDaemonStatusAsync(cancellationToken).ConfigureAwait(false);
+        EnsureCapability(status);
+        return status.HttpService
+            ?? throw new InvalidDataException("The CLI daemon did not return its MCP HTTP service status.");
     }
 
     public Task<DaemonStatus> GetDaemonStatusAsync(CancellationToken cancellationToken)
@@ -144,19 +152,21 @@ internal sealed class HostControlClient : IHostControlClient
     }
 
     public Task<HttpServiceStatus> ConfigureServiceAsync(
-        string bindMode,
-        int port,
+        ConfigureHttpServiceRequest request,
         CancellationToken cancellationToken)
     {
-        return SendAsync<ConfigureHttpServiceRequest, HttpServiceStatus>(
+        return SendManagedAsync<ConfigureHttpServiceRequest, HttpServiceStatus>(
             DaemonProtocol.ConfigureHttpService,
-            new ConfigureHttpServiceRequest { BindMode = bindMode, Port = port },
+            request,
             cancellationToken);
     }
 
+    public Task<HttpServiceStatus> ApplyStartupAsync(CancellationToken cancellationToken) =>
+        SendManagedAsync<EmptyRequest, HttpServiceStatus>(DaemonProtocol.ApplyHttpStartup, new EmptyRequest(), cancellationToken);
+
     public Task<HttpServiceStatus> EnableServiceAsync(bool confirm, CancellationToken cancellationToken)
     {
-        return SendAsync<SetHttpServiceEnabledRequest, HttpServiceStatus>(
+        return SendManagedAsync<SetHttpServiceEnabledRequest, HttpServiceStatus>(
             DaemonProtocol.EnableHttpService,
             new SetHttpServiceEnabledRequest { Confirm = confirm },
             cancellationToken);
@@ -164,7 +174,7 @@ internal sealed class HostControlClient : IHostControlClient
 
     public Task<HttpServiceStatus> DisableServiceAsync(bool confirm, CancellationToken cancellationToken)
     {
-        return SendAsync<SetHttpServiceEnabledRequest, HttpServiceStatus>(
+        return SendManagedAsync<SetHttpServiceEnabledRequest, HttpServiceStatus>(
             DaemonProtocol.DisableHttpService,
             new SetHttpServiceEnabledRequest { Confirm = confirm },
             cancellationToken);
@@ -180,7 +190,7 @@ internal sealed class HostControlClient : IHostControlClient
 
     public Task<AuthorizeHttpClientResponse> AuthorizeClientAsync(string name, CancellationToken cancellationToken)
     {
-        return SendAsync<AuthorizeHttpClientRequest, AuthorizeHttpClientResponse>(
+        return SendManagedAsync<AuthorizeHttpClientRequest, AuthorizeHttpClientResponse>(
             DaemonProtocol.AuthorizeHttpClient,
             new AuthorizeHttpClientRequest { Name = name },
             cancellationToken);
@@ -190,7 +200,7 @@ internal sealed class HostControlClient : IHostControlClient
         string clientId,
         CancellationToken cancellationToken)
     {
-        return SendAsync<DeauthorizeHttpClientRequest, DeauthorizeHttpClientResponse>(
+        return SendManagedAsync<DeauthorizeHttpClientRequest, DeauthorizeHttpClientResponse>(
             DaemonProtocol.DeauthorizeHttpClient,
             new DeauthorizeHttpClientRequest { ClientId = clientId, Confirm = true },
             cancellationToken);
@@ -208,10 +218,21 @@ internal sealed class HostControlClient : IHostControlClient
         string connectionId,
         CancellationToken cancellationToken)
     {
-        return SendAsync<DisconnectHttpConnectionRequest, DisconnectHttpConnectionResponse>(
+        return SendManagedAsync<DisconnectHttpConnectionRequest, DisconnectHttpConnectionResponse>(
             DaemonProtocol.DisconnectHttpConnection,
             new DisconnectHttpConnectionRequest { ConnectionId = connectionId, Confirm = true },
             cancellationToken);
+    }
+
+    /// <summary>Checks the current peer before sending settings that older daemons can silently ignore.</summary>
+    /// <param name="method">The managed HTTP mutation to invoke after capability validation.</param>
+    /// <param name="payload">The captured settings or explicitly confirmed operation.</param>
+    /// <param name="cancellationToken">Cancels both discovery and the control exchange.</param>
+    private async Task<TResponse> SendManagedAsync<TRequest, TResponse>(
+        string method, TRequest payload, CancellationToken cancellationToken)
+    {
+        EnsureCapability(await GetDaemonStatusAsync(cancellationToken).ConfigureAwait(false));
+        return await SendAsync<TRequest, TResponse>(method, payload, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<DaemonStatus?> TryGetDaemonStatusAsync(CancellationToken cancellationToken)
@@ -301,10 +322,11 @@ internal sealed class HostControlClient : IHostControlClient
 
     internal static void EnsureCapability(DaemonStatus status)
     {
-        if (!status.Capabilities.Contains(DaemonProtocol.ManagedHttpCapability, StringComparer.Ordinal))
+        if (status.Capabilities?.Contains(DaemonProtocol.ManagedHttpCapability, StringComparer.Ordinal) != true)
         {
             throw new InvalidOperationException(
-                "The running CLI daemon predates managed MCP HTTP support. Run 'fiddler-classic-cli daemon stop' and restart Fiddler.");
+                $"The running CLI daemon ({status.HostVersion}) does not support the current MCP HTTP settings. " +
+                "Install the matching CLI and bridge, then run 'fiddler-classic-cli daemon stop' and restart Fiddler.");
         }
     }
 

@@ -59,7 +59,7 @@ public sealed partial class BridgeControlPanelTests
                 PumpUntilCompleted(panel.RefreshForTestingAsync());
 
                 Assert.Equal("Listening on 127.0.0.1:9001", panel.ServiceStateText);
-                Assert.False(panel.ServiceSettingsEnabled);
+                Assert.True(panel.ServiceSettingsEnabled);
                 Assert.Equal(1, panel.ClientRowCount);
                 Assert.Equal(1, panel.ConnectionRowCount);
 
@@ -84,7 +84,8 @@ public sealed partial class BridgeControlPanelTests
         var capability = Assert.Throws<InvalidOperationException>(() =>
             HostControlClient.EnsureCapability(new DaemonStatus()));
 
-        Assert.Contains("predates managed MCP HTTP support", capability.Message);
+        Assert.Contains("does not support the current MCP HTTP settings", capability.Message);
+        Assert.Contains("Install the matching CLI and bridge", capability.Message);
         Assert.Contains("daemon stop", capability.Message);
     }
 
@@ -130,15 +131,26 @@ public sealed partial class BridgeControlPanelTests
         public DaemonStatus Daemon { get; set; } = new DaemonStatus { HostVersion = "test-v1" };
         public HostLaunchRecord? LaunchRecord { get; set; }
         public int StartCount { get; private set; }
+        public int StartupCount { get; private set; }
+        public TaskCompletionSource<HostStartResult>? PendingStart { get; set; }
+        public int CredentialActionCount { get; private set; }
+        public ConfigureHttpServiceRequest? LastConfiguration { get; private set; }
+        public bool? LastConfirmation { get; private set; }
+        public Exception? MutationFailure { get; set; }
+        public Action? BeforeMutation { get; set; }
         public int ServiceStatusCount { get; private set; }
         public int DaemonStatusCount { get; private set; }
+        public int ConfigureCount { get; private set; }
+        public int EnableCount { get; private set; }
+        public int DisableCount { get; private set; }
+        public List<string> MutationCalls { get; } = new List<string>();
 
         public HostLaunchRecord? ReadLaunchRecord() => LaunchRecord;
 
-        public Task<DaemonStatus> EnsureStartedAsync(CancellationToken cancellationToken)
+        public Task<HostStartResult> EnsureStartedAsync(CancellationToken cancellationToken)
         {
             StartCount++;
-            return Complete(Daemon, cancellationToken);
+            return PendingStart?.Task ?? Complete(HostStartResult.Reused, cancellationToken);
         }
 
         public Task<DaemonStatus> GetDaemonStatusAsync(CancellationToken cancellationToken)
@@ -155,30 +167,95 @@ public sealed partial class BridgeControlPanelTests
         }
 
         public Task<HttpServiceStatus> ConfigureServiceAsync(
-            string bindMode,
-            int port,
+            ConfigureHttpServiceRequest request,
             CancellationToken cancellationToken)
         {
-            Service = new HttpServiceStatus { BindMode = bindMode, Port = port };
+            ConfigureCount++;
+            MutationCalls.Add("configure");
+            LastConfiguration = request;
+            BeforeMutation?.Invoke();
+            if (MutationFailure is not null) return Task.FromException<HttpServiceStatus>(MutationFailure);
+            if ((Service.Enabled || Service.Running) && (request.BindMode is not null || request.Port.HasValue
+                || request.BindAddresses is not null || request.AuthenticationMode is not null))
+                return Task.FromException<HttpServiceStatus>(new InvalidOperationException("Disable MCP HTTP before configuring bindings or authentication."));
+            var next = CloneService();
+            if (request.BindMode is not null) next.BindMode = request.BindMode;
+            if (request.Port.HasValue) next.Port = request.Port.Value;
+            if (request.BindAddresses is not null) next.BindAddresses = request.BindAddresses;
+            if (request.StartupMode is not null) next.StartupMode = request.StartupMode;
+            if (request.AuthenticationMode is not null) next.AuthenticationMode = request.AuthenticationMode;
+            if ((request.AuthenticationMode == HttpAuthenticationModes.None || next.StartupMode == HttpStartupModes.Enabled && RiskyAccess(next)) && !request.Confirm)
+                return Task.FromException<HttpServiceStatus>(new InvalidOperationException("confirmation_required"));
+            Service = next;
             return Task.FromResult(Service);
         }
 
-        public Task<HttpServiceStatus> EnableServiceAsync(bool confirm, CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpServiceStatus());
+        public Task<HttpServiceStatus> ApplyStartupAsync(CancellationToken cancellationToken)
+        {
+            StartupCount++;
+            if (Service.StartupMode == HttpStartupModes.Enabled) Service.Enabled = true;
+            else if (Service.StartupMode == HttpStartupModes.Disabled) Service.Enabled = false;
+            return Complete(Service, cancellationToken);
+        }
 
-        public Task<HttpServiceStatus> DisableServiceAsync(bool confirm, CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpServiceStatus());
+        public Task<HttpServiceStatus> EnableServiceAsync(bool confirm, CancellationToken cancellationToken)
+        {
+            EnableCount++;
+            MutationCalls.Add("enable");
+            LastConfirmation = confirm;
+            BeforeMutation?.Invoke();
+            if (MutationFailure is not null) return Task.FromException<HttpServiceStatus>(MutationFailure);
+            if (RiskyAccess(Service) && !confirm)
+                return Task.FromException<HttpServiceStatus>(new InvalidOperationException("confirmation_required"));
+            Service = CloneService();
+            Service.Enabled = true;
+            return Task.FromResult(Service);
+        }
+
+        public Task<HttpServiceStatus> DisableServiceAsync(bool confirm, CancellationToken cancellationToken)
+        {
+            DisableCount++;
+            MutationCalls.Add("disable");
+            LastConfirmation = confirm;
+            BeforeMutation?.Invoke();
+            if (MutationFailure is not null) return Task.FromException<HttpServiceStatus>(MutationFailure);
+            if (Service.ActiveConnectionCount > 0 && !confirm)
+                return Task.FromException<HttpServiceStatus>(new InvalidOperationException("confirmation_required"));
+            Service = CloneService();
+            Service.Enabled = false;
+            Service.Running = false;
+            return Task.FromResult(Service);
+        }
 
         public Task<ListHttpClientsResponse> ListClientsAsync(CancellationToken cancellationToken) =>
             Complete(Clients, cancellationToken);
 
         public Task<AuthorizeHttpClientResponse> AuthorizeClientAsync(
             string name,
-            CancellationToken cancellationToken) => Task.FromResult(new AuthorizeHttpClientResponse());
+            CancellationToken cancellationToken)
+        {
+            CredentialActionCount++;
+            return Task.FromResult(new AuthorizeHttpClientResponse());
+        }
 
         public Task<DeauthorizeHttpClientResponse> DeauthorizeClientAsync(
             string clientId,
-            CancellationToken cancellationToken) => Task.FromResult(new DeauthorizeHttpClientResponse());
+            CancellationToken cancellationToken)
+        {
+            CredentialActionCount++;
+            return Task.FromResult(new DeauthorizeHttpClientResponse());
+        }
+
+        private HttpServiceStatus CloneService()
+        {
+            var serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            return serializer.Deserialize<HttpServiceStatus>(serializer.Serialize(Service));
+        }
+
+        private static bool RiskyAccess(HttpServiceStatus service) => service.AuthenticationMode == HttpAuthenticationModes.None
+            || service.BindMode == HttpBindModes.All
+            || service.BindMode == HttpBindModes.Selected && service.BindAddresses.Any(value =>
+                !System.Net.IPAddress.IsLoopback(System.Net.IPAddress.Parse(value)));
 
         public Task<ListHttpConnectionsResponse> ListConnectionsAsync(CancellationToken cancellationToken) =>
             Complete(Connections, cancellationToken);

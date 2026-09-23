@@ -114,9 +114,44 @@ extension.
   contents, or FARX contents to diagnostics or test logs.
 - Scope named pipes, token files, configuration directories, and bridge deployment
   to the current Windows user.
-- Keep managed MCP HTTP disabled and bound to `127.0.0.1` by default. Permit IPv4
-  `0.0.0.0` only after explicit plaintext-credential confirmation. Require bearer
-  authentication and do not enable CORS or configure TLS or firewall rules.
+- Keep managed MCP HTTP disabled and bound to `127.0.0.1` by default, with
+  `HttpAuthenticationMode` set to `non-loopback`. Allow `all` or up to 16
+  explicitly selected active local IPv4 addresses after confirmation of the
+  relevant remote-access risk. Persist exact addresses and never widen or
+  substitute a binding when an address becomes unavailable.
+- Use config-file string `HttpAuthenticationMode` with `required`, `non-loopback`,
+  or `none`. Wire DTOs use `AuthenticationMode`. Wire and CLI service JSON use
+  `authenticationMode`. Fresh or unset configuration defaults to `non-loopback`.
+  Load explicit legacy config-file `HttpRequireAuthentication` values as `required`
+  for `true` and `none` for `false`.
+  In `non-loopback`, bypass bearer checks only when both actual remote and local
+  socket IPs are loopback after normalizing IPv4-mapped addresses. Requests to a
+  LAN address require authentication even when sent locally. Unknown socket
+  addresses fail closed. Never use Host, Forwarded, or X-Forwarded-For for this
+  exemption. Preserve credentials and omit credential attribution for anonymous
+  requests, including loopback bypasses. Document that local processes, including
+  those under other Windows accounts, can access anonymous loopback MCP. Named
+  pipes remain current-user-only. Local relays or reverse proxies connecting over
+  loopback appear as loopback peers. Use `required` when these callers must
+  authenticate.
+- Require confirmation when saving or enabling `none`: every reachable client
+  gains full MCP access, including captured traffic and mutation tools. Saving or
+  enabling loopback-only `non-loopback` needs no access-risk warning. Remote
+  enablement still requires confirmation, with a plaintext-credential warning
+  when authentication applies. Foreground `mcp http` remains loopback-only and
+  requires bearer authentication. Reject all Origin-bearing requests in every
+  mode and validate anonymous requests' Host headers against the actual receiving
+  socket address and port to prevent DNS rebinding. Do not enable CORS or
+  configure TLS or firewall rules.
+- Require the managed service to be disabled before changing bindings, port, or
+  authentication. The panel may stage binding edits while enabled, then use the
+  confirmed stop/configure/start controls on Apply. Preserve edits and report
+  partial failures without retrying uncertain mutations. Permit startup-policy
+  changes while running, with confirmation when they authorize remote startup or
+  startup in mode `none`. Default to `last-state`. Use an authentication dropdown with descriptive labels. Set
+  `UseCompatibleTextRendering=false` on the selected-interface checklist to match
+  surrounding native controls. Guard this contract with `managed-http-v3`; keep
+  daemon envelope v1 and bridge protocol v3 unchanged.
 - Keep destructive operations explicitly confirmed. Non-interactive CLI callers
   use `--yes`. MCP callers use the corresponding confirmation argument.
 - Mark MCP tools accurately as read-only, destructive, idempotent, and open-world.

@@ -43,6 +43,11 @@ public sealed class DiagnosticExportServiceTests : IDisposable
         rawDaemon.HttpService!.Endpoint = "https://" + Secret + "/?token=" + Secret;
         rawDaemon.HttpService.LoopbackEndpoint = Secret;
         rawDaemon.HttpService.LanEndpoints = ["http://198.51.100.42:8877/mcp", Secret];
+        rawDaemon.HttpService.BindAddresses = ["198.51.100.42", Secret];
+        rawDaemon.HttpService.Endpoints = [Secret];
+        rawDaemon.HttpService.AvailableInterfaces = [new() { Address = Secret, AdapterName = Secret }];
+        rawDaemon.HttpService.StartupMode = Secret;
+        rawDaemon.HttpService.AuthenticationMode = Secret;
         rawDaemon.HttpService.LastError = "Authorization: Bearer " + Secret;
         rawDaemon.HttpService.ActiveConnectionCount = 777777;
         var service = new DiagnosticExportService(
@@ -80,7 +85,7 @@ public sealed class DiagnosticExportServiceTests : IDisposable
         Assert.Equal("0.3.0", daemon.GetProperty("hostVersion").GetString());
         Assert.Equal([DaemonProtocol.ManagedHttpCapability],
             daemon.GetProperty("capabilities").EnumerateArray().Select(value => value.GetString()));
-        Assert.Equal(["enabled", "running", "bindMode", "bindAddress", "port"],
+        Assert.Equal(["enabled", "running", "bindMode", "bindAddress", "port", "startupMode", "authenticationMode"],
             daemon.GetProperty("listener").EnumerateObject().Select(property => property.Name));
         Assert.Equal(2, root.GetProperty("errors").GetArrayLength());
     }

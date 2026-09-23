@@ -33,30 +33,44 @@ public sealed partial class BridgeControlPanelTests
             panel.Size = new Size(width, 1000);
             Application.DoEvents();
             panel.PerformLayout();
+            LayoutAllTabs(panel);
             Assert.True(panel.Controls[0].Right <= panel.ClientSize.Width, "Content must stay within the pane width.");
-            if (panel.Controls[0].Height > panel.ClientSize.Height)
-                Assert.True(panel.VerticalScroll.Visible, "Sections below the viewport must remain scrollable.");
+            foreach (var page in Descendants(panel).OfType<TabPage>())
+                if (page.Controls[0].Height > page.ClientSize.Height)
+                    Assert.True(page.VerticalScroll.Visible, "Sections below each tab viewport must remain scrollable.");
             foreach (var button in Descendants(panel).OfType<Button>())
             {
-                for (Control child = button; child.Parent is not null && child.Parent != panel; child = child.Parent)
+                for (Control child = button; child.Parent is not null && child.Parent is not TabPage; child = child.Parent)
                 {
                     Assert.True(child.Parent.ClientRectangle.Contains(child.Bounds),
                         $"'{button.Text}' is clipped by {child.Parent.GetType().Name} at width {width}, font {fontSize}: {child.Bounds} / {child.Parent.ClientRectangle}, preferred {child.Parent.GetPreferredSize(new Size(child.Parent.Width, 0))}.");
                 }
             }
 
-            var service = Descendants(panel).OfType<GroupBox>().Single(group => group.Text == "MCP HTTP service");
-            var rows = Assert.Single(service.Controls.OfType<TableLayoutPanel>());
-            for (var row = 0; row < 4; row++)
+            foreach (var name in new[] { "Loopback", "Bind", "Port" })
             {
-                var caption = rows.GetControlFromPosition(0, row)!;
-                var value = rows.GetControlFromPosition(1, row)!;
-                Assert.True(Math.Abs((caption.Top + caption.Height / 2) - (value.Top + value.Height / 2)) <= 1,
-                    $"Row {row} at width {width}, font {fontSize}: caption {caption.Bounds}, value {value.Bounds}.");
+                var rows = name == "Loopback"
+                    ? Assert.Single(Named<GroupBox>(panel, "MCP addresses").Controls.OfType<TableLayoutPanel>())
+                    : Named<TableLayoutPanel>(panel, "MCP service controls");
+                var caption = Assert.Single(rows.Controls.OfType<Label>(), label => label.AccessibleName == name);
+                var row = rows.GetRow(caption);
+                var value = rows.GetControlFromPosition(1, row);
+                if (name == "Loopback" && value is null)
+                {
+                    value = Assert.IsType<EndpointRow>(rows.GetControlFromPosition(0, row + 1));
+                    Assert.Equal(2, rows.GetColumnSpan(value));
+                    Assert.True(value.Top >= caption.Bottom, "The stacked address must follow its caption.");
+                }
+                else
+                {
+                    Assert.NotNull(value);
+                    Assert.True(Math.Abs((caption.Top + caption.Height / 2) - (value.Top + value.Height / 2)) <= 1,
+                        $"Row {row} at width {width}, font {fontSize}: caption {caption.Bounds}, value {value.Bounds}.");
+                }
                 Assert.True(value.Right <= rows.ClientSize.Width, $"Service value in row {row} extends outside the pane.");
             }
 
-            foreach (var label in Descendants(panel).OfType<Label>())
+            foreach (var label in Descendants(panel).OfType<Label>().Where(label => label.Text.Length > 0))
             {
                 Assert.True(label.Right <= label.Parent!.ClientSize.Width,
                     $"Text '{label.Text}' at {width}/{fontSize} extends outside {label.Parent.GetType().Name}: {label.Bounds} / {label.Parent.ClientSize}.");
@@ -76,7 +90,7 @@ public sealed partial class BridgeControlPanelTests
         var client = new FakeHostControlClient();
         using var panel = new BridgeControlPanel(client) { Size = new Size(320, 700) };
         CompleteRefresh(panel);
-        var service = Descendants(panel).OfType<GroupBox>().Single(group => group.Text == "MCP HTTP service");
+        var service = Named<TableLayoutPanel>(panel, "MCP service controls");
         var initialHeight = service.Height;
         client.Service.LastError = string.Join(" ", Enumerable.Repeat("The host is unavailable. Check its configuration.", 8));
         if (failedRequest) client.Failure = new InvalidOperationException(client.Service.LastError);
@@ -88,7 +102,7 @@ public sealed partial class BridgeControlPanelTests
         Assert.True(service.Height > initialHeight);
         Assert.True(error.Height >= error.GetPreferredSize(new Size(error.Width, 0)).Height);
         Assert.True(clients.Top >= service.Bottom);
-        Assert.True(panel.VerticalScroll.Visible);
+        Assert.True(Named<TabPage>(panel, "MCP").VerticalScroll.Visible);
     });
 
     private static void SaveLayoutSnapshot(Control panel, int width, float fontSize)
@@ -99,7 +113,7 @@ public sealed partial class BridgeControlPanelTests
         using var bitmap = new Bitmap(panel.Width, panel.Height);
         panel.DrawToBitmap(bitmap, panel.ClientRectangle);
         bitmap.Save(Path.Combine(directory, $"panel-{width}-{fontSize:0.##}.png"));
-        var pipes = Named<GroupBox>(panel, "Named pipes");
+        var pipes = Named<TableLayoutPanel>(panel, "Named pipes");
         using var pipesBitmap = new Bitmap(pipes.Width, pipes.Height);
         pipes.DrawToBitmap(pipesBitmap, pipes.ClientRectangle);
         pipesBitmap.Save(Path.Combine(directory, $"pipes-{width}-{fontSize:0.##}.png"));
@@ -118,6 +132,7 @@ public sealed partial class BridgeControlPanelTests
             Size = new Size(1200, 1000)
         };
         CompleteRefresh(panel);
+        SelectTab(panel, "Settings");
         panel.PerformLayout();
         var group = Descendants(panel).OfType<GroupBox>().Single(control => control.Text == "Versions");
         group.PerformLayout();
@@ -133,4 +148,28 @@ public sealed partial class BridgeControlPanelTests
         Assert.True(groupBounds.Bottom <= contentBounds.Bottom, "The group must fit every version line.");
         Assert.Contains("Running daemon:", label.Text);
     });
+
+    private static void SelectTab(Control panel, string name)
+    {
+        panel.CreateControl();
+        if (panel is BridgeControlPanel management) PumpUntilIdle(management);
+        var tabs = Named<TabControl>(panel, "Management sections");
+        tabs.SelectedTab = Named<TabPage>(panel, name);
+        tabs.PerformLayout();
+        tabs.SelectedTab.PerformLayout();
+    }
+
+    private static void LayoutAllTabs(Control panel)
+    {
+        panel.CreateControl();
+        if (panel is BridgeControlPanel management) PumpUntilIdle(management);
+        var tabs = Named<TabControl>(panel, "Management sections");
+        var selected = tabs.SelectedTab;
+        foreach (TabPage page in tabs.TabPages)
+        {
+            tabs.SelectedTab = page;
+            page.PerformLayout();
+        }
+        tabs.SelectedTab = selected;
+    }
 }

@@ -30,11 +30,11 @@ internal static class TextPromptDialog
     internal static Form CreatePromptForm(string title, string prompt)
     {
         var input = new TextBox { Name = "promptInput", AccessibleName = "Client name", MaxLength = 64 };
-        var ok = new Button { Text = "&OK", AccessibleName = "Authorize client", DialogResult = DialogResult.OK, AutoSize = true };
-        var cancel = new Button { Text = "Ca&ncel", AccessibleName = "Cancel authorization", DialogResult = DialogResult.Cancel, AutoSize = true };
+        var ok = new PanelButton { Text = "&OK", AccessibleName = "Authorize client", DialogResult = DialogResult.OK, AutoSize = true };
+        var cancel = new PanelButton { Text = "Ca&ncel", AccessibleName = "Cancel authorization", DialogResult = DialogResult.Cancel, AutoSize = true };
         var form = CreateForm(title, 420,
             new Label { Text = prompt.Contains("&") ? prompt : "&" + prompt, AccessibleName = "Client name prompt", AutoSize = true },
-            input, CreateActions(ok, cancel));
+            input, PanelStyle.CreateActions(ok, cancel));
         form.AcceptButton = ok;
         form.CancelButton = cancel;
         form.Shown += (_, _) => input.Focus();
@@ -48,9 +48,12 @@ internal static class TextPromptDialog
     internal static Form CreateSecretForm(string clientName, string token)
     {
         var value = new TextBox { Text = token, ReadOnly = true, AccessibleName = "Bearer token" };
-        var copy = new Button { Text = "&Copy", AccessibleName = "Copy bearer token", AutoSize = true, Enabled = !string.IsNullOrEmpty(token) };
-        var close = new Button { Text = "C&lose", AccessibleName = "Close token dialog", DialogResult = DialogResult.OK, AutoSize = true };
-        copy.Click += (_, _) => Clipboard.SetText(token);
+        var copy = new ClipboardButton
+        {
+            AccessibleName = "Copy bearer token", Enabled = !string.IsNullOrEmpty(token),
+            ToolTipText = "Copy this one-time bearer token to the clipboard.", GetCopyText = () => token
+        };
+        var close = new PanelButton { Text = "C&lose", AccessibleName = "Close token dialog", DialogResult = DialogResult.OK, AutoSize = true };
         var form = CreateForm("Authorized MCP HTTP client", 560,
             new Label
             {
@@ -60,7 +63,7 @@ internal static class TextPromptDialog
                 AutoSize = true
             },
             new Label { Text = "&Token", AccessibleName = "Token label", AutoSize = true },
-            value, CreateActions(copy, close));
+            value, PanelStyle.CreateActions(copy, close));
         form.AcceptButton = close;
         form.CancelButton = close;
         form.Shown += (_, _) => { value.Focus(); value.SelectAll(); };
@@ -114,23 +117,5 @@ internal static class TextPromptDialog
         };
         form.Controls.Add(layout);
         return form;
-    }
-
-    private static FlowLayoutPanel CreateActions(params Button[] buttons)
-    {
-        var actions = new FlowLayoutPanel
-        {
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            WrapContents = true,
-            Margin = Padding.Empty,
-            TabStop = false
-        };
-        for (var index = 0; index < buttons.Length; index++)
-        {
-            buttons[index].TabIndex = index;
-            actions.Controls.Add(buttons[index]);
-        }
-        return actions;
     }
 }

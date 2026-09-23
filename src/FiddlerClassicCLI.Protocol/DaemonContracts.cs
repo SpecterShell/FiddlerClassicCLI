@@ -11,18 +11,42 @@ public static class DaemonProtocol
     public const string ConfigureHttpService = "http.service.configure";
     public const string EnableHttpService = "http.service.enable";
     public const string DisableHttpService = "http.service.disable";
+    public const string ApplyHttpStartup = "http.service.startup";
     public const string ListHttpClients = "http.clients.list";
     public const string AuthorizeHttpClient = "http.clients.authorize";
     public const string DeauthorizeHttpClient = "http.clients.deauthorize";
     public const string ListHttpConnections = "http.connections.list";
     public const string DisconnectHttpConnection = "http.connections.disconnect";
-    public const string ManagedHttpCapability = "managed-http-v1";
+    public const string ManagedHttpCapability = "managed-http-v3";
 }
 
 public static class HttpBindModes
 {
     public const string Loopback = "loopback";
     public const string All = "all";
+    public const string Selected = "selected";
+}
+
+public static class HttpStartupModes
+{
+    public const string LastState = "last-state";
+    public const string Enabled = "enabled";
+    public const string Disabled = "disabled";
+}
+
+public static class HttpAuthenticationModes
+{
+    public const string Required = "required";
+    public const string NonLoopback = "non-loopback";
+    public const string None = "none";
+
+    public static bool IsValid(string? mode) => mode is Required or NonLoopback or None;
+}
+
+public static class HttpListenerLimits
+{
+    public const int MaximumSelectedAddresses = 16;
+    public const int MaximumAvailableInterfaces = 64;
 }
 
 public sealed class DaemonRequest
@@ -66,6 +90,12 @@ public sealed class HttpServiceStatus
     public string BindAddress { get; set; } = "127.0.0.1";
     public int Port { get; set; } = 8877;
     public string Endpoint { get; set; } = "http://127.0.0.1:8877/mcp";
+    // The singular fields describe the first binding. Arrays describe every configured binding.
+    public string[] BindAddresses { get; set; } = new[] { "127.0.0.1" };
+    public string[] Endpoints { get; set; } = new[] { "http://127.0.0.1:8877/mcp" };
+    public HttpInterfaceAddressDto[] AvailableInterfaces { get; set; } = Array.Empty<HttpInterfaceAddressDto>();
+    public string StartupMode { get; set; } = HttpStartupModes.LastState;
+    public string AuthenticationMode { get; set; } = HttpAuthenticationModes.NonLoopback;
     // Client address hints are separate from Endpoint, which preserves the listener's bind URL.
     public string LoopbackEndpoint { get; set; } = string.Empty;
     public string[] LanEndpoints { get; set; } = Array.Empty<string>();
@@ -77,6 +107,16 @@ public sealed class ConfigureHttpServiceRequest
 {
     public string? BindMode { get; set; }
     public int? Port { get; set; }
+    public string[]? BindAddresses { get; set; }
+    public string? StartupMode { get; set; }
+    public string? AuthenticationMode { get; set; }
+    public bool Confirm { get; set; }
+}
+
+public sealed class HttpInterfaceAddressDto
+{
+    public string Address { get; set; } = string.Empty;
+    public string AdapterName { get; set; } = string.Empty;
 }
 
 public sealed class SetHttpServiceEnabledRequest

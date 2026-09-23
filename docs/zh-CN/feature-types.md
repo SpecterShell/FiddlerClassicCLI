@@ -40,9 +40,9 @@
 | CLI 安装 | `scripts/install.ps1`、`scripts/install-local.ps1` | 主程序 | 将已发布程序安装到固定的当前用户路径，更新 PATH，并默认部署嵌入的桥接。`scripts/install.ps1` 下载发布 EXE 并验证 GitHub 提供的文件 SHA-256 摘要，也可使用显式指定的本地来源。开发安装脚本选用所在仓库中已有的发布输出，无需下载。两者均不会启动 Fiddler、守护进程或 MCP 服务器，也不安装 Agent Skills。 |
 | 诊断与桥接维护 | `doctor`、`bridge install\|uninstall` | 主程序 | 查找文件、进程、版本、管道和配置，复制桥接程序集，并维护当前用户的主程序启动记录。只有连接探测会访问运行中的桥接。 |
 | Fiddler 应用程序管理 | `app detect\|open\|close\|restart`（仅 CLI） | 主程序 | 通过 Windows API 查找可执行文件，以及当前会话中属于当前用户的进程。显式启动使用 `-noattach`。经确认的关闭和重启请求正常关闭窗口，不会强制终止或自动保存捕获记录。 |
-| 守护进程与 MCP 传输 | `daemon`、`mcp stdio\|http` | 主程序 | 在 Fiddler 外部实现本地 IPC 和 JSON-RPC 传输。C# SDK 2.2.0 支持 MCP `2026-07-28` 和旧版初始化流程，详见[协议兼容性](cli.md#mcp-协议)。守护进程可以管理按已保存设置配置的 HTTP 监听器。前台服务器仅绑定回环地址。两者均拒绝携带 Origin 的请求。 |
-| 托管 HTTP 访问 | `mcp service`、`mcp clients`、`mcp connections`、`config token` | 主程序 | 在 Fiddler 外部实现监听器配置、强制 Bearer 身份验证、命名凭据哈希和活动传输控制，不会改变抓包代理。 |
-| Fiddler 管理界面 | **Fiddler Classic CLI** 标签页和 Tools 菜单入口 | 混合 | 扩展在 Fiddler 中显示控件、版本和只读命名管道诊断。管道刷新读取桥接监听器状态和守护进程状态，不启动守护进程或配置监听器。守护进程管理持久 HTTP 状态、凭据与连接。 |
+| 守护进程与 MCP 传输 | `daemon`、`mcp stdio\|http` | 主程序 | 在 Fiddler 外部实现本地 IPC 和 JSON-RPC 传输。C# SDK 2.2.0 支持 MCP `2026-07-28` 和旧版初始化流程，详见[协议兼容性](cli.md#mcp-协议)。守护进程应用已保存的 HTTP 启动策略。前台服务器仅绑定回环地址，并始终要求身份验证。前台和托管 HTTP 服务器在所有身份验证模式下都拒绝携带 Origin 的请求，匿名托管请求还须通过 Host 校验。 |
+| 托管 HTTP 访问 | `mcp service`、`mcp clients`、`mcp connections`、`config token` | 主程序 | 配置回环、全接口或最多 16 个选定本地 IPv4 地址的绑定，以及启动策略、身份验证、命名凭据和活动连接。身份验证模式为 `required`、`non-loopback`（默认值）和 `none`。默认仅豁免实际套接字远端和本地 IP 都是回环地址的连接。即使请求来自本机，访问局域网地址仍须提供凭据。保存或启用 `none` 需要明确确认风险。所有匿名请求均拥有完整 MCP 权限，且不会归属到任何凭据。选定绑定不会回退到其他地址，Fiddler 抓包代理保持不变。 |
+| Fiddler 管理界面 | **Fiddler Classic CLI** 标签页和 Tools 菜单入口 | 混合 | 扩展使用原生 MCP、Named pipes 和 Settings 子标签页显示监听器控件、客户端、连接、管道诊断、启动与身份验证设置、版本，以及项目和文档链接。身份验证使用带描述性选项的下拉框。接口选择列表使用原生文字渲染，与周围控件保持一致。绑定修改在点击 Apply 后生效，已启用的监听器会在确认后重启。管道刷新仅读取状态。扩展加载时应用启动策略，不依赖标签页选择。守护进程持有持久 HTTP 状态、凭据与连接。 |
 | 有界会话汇总 | `sessions list --summary`、`summarize_network_requests` | 混合 | 主程序汇总一个有数量上限的原生元数据页。按主机和状态码统计的数量、已捕获正文字节总数和已完成请求耗时仅覆盖返回记录，不读取标头或正文。 |
 | 仅含元数据的诊断文件 | `doctor --output` | 混合 | 从本地、桥接和守护进程状态中选取白名单字段生成报告，不启动守护进程。报告排除流量、凭据、身份、本地路径和原始错误。 |
 

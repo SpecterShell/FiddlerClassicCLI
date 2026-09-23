@@ -100,7 +100,7 @@ public sealed class ConfigConcurrencyTests : IDisposable
             }
             else if (role == "configure")
             {
-                store.ConfigureHttpService(HttpBindModes.All, 9000 + index);
+                store.ConfigureHttpService(new ConfigureHttpServiceRequest { BindMode = HttpBindModes.All, Port = 9000 + index });
             }
             else if (index < 12)
             {
@@ -130,7 +130,7 @@ public sealed class ConfigConcurrencyTests : IDisposable
             Assert.Equal(ErrorCodes.Timeout, Assert.IsType<HttpAdministrationException>(failure).Code);
         }
 
-        Assert.Throws<HttpAdministrationException>(() => store.ConfigureHttpService("invalid", null));
+        Assert.Throws<HttpAdministrationException>(() => store.ConfigureHttpService(new ConfigureHttpServiceRequest { BindMode = "invalid" }));
         Assert.NotNull(new ConfigStore(_directory).GetOrCreate());
     }
 

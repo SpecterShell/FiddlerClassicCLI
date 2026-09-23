@@ -178,6 +178,11 @@ internal sealed class DaemonServer
                 case DaemonProtocol.HttpServiceStatus:
                     return Success(request, JsonSerializer.Serialize(_httpService.GetStatus(), JsonOptions));
 
+                case DaemonProtocol.ApplyHttpStartup:
+                    ReadPayload<EmptyRequest>(request);
+                    return Success(request, JsonSerializer.Serialize(
+                        await _httpService.ApplyStartupAsync(cancellationToken).ConfigureAwait(false), JsonOptions));
+
                 case DaemonProtocol.ConfigureHttpService:
                     return Success(
                         request,

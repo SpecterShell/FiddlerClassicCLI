@@ -13,6 +13,69 @@ namespace FiddlerClassicCLI.Tests;
 
 public sealed class DaemonServerTests
 {
+    [Fact]
+    public async Task AppliesStartupAndAccessPreferencesThroughSharedControlContract()
+    {
+        var pipeName = "fiddler-http-settings-daemon-" + Guid.NewGuid().ToString("N");
+        var directory = Directory.CreateTempSubdirectory("fiddler-http-settings-daemon-").FullName;
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        lifetime.CancelAfter(TimeSpan.FromSeconds(20));
+        var serverTask = new DaemonServer(pipeName, TimeSpan.FromSeconds(1), new ConfigStore(directory)).RunAsync(lifetime.Token);
+        var client = new DaemonClient("unused.exe", pipeName, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+        try
+        {
+            var initial = await WaitForStatus(client, lifetime.Token);
+            Assert.Contains(DaemonProtocol.ManagedHttpCapability, initial.Capabilities);
+            // Match Save settings: authentication alone must be accepted without resending bindings.
+            var preferences = await client.ConfigureHttpServiceAsync(new ConfigureHttpServiceRequest
+                { AuthenticationMode = HttpAuthenticationModes.None, Confirm = true }, lifetime.Token);
+            Assert.Equal(HttpAuthenticationModes.None, preferences.AuthenticationMode);
+            Assert.False(preferences.Enabled);
+            Assert.False(preferences.Running);
+            Assert.Equal(initial.HttpService!.BindMode, preferences.BindMode);
+            Assert.Equal(initial.HttpService.Port, preferences.Port);
+            var configured = await client.ConfigureHttpServiceAsync(new ConfigureHttpServiceRequest
+            {
+                BindMode = HttpBindModes.Selected, BindAddresses = ["127.0.0.1"], Port = GetFreePort(),
+                StartupMode = HttpStartupModes.Enabled, AuthenticationMode = HttpAuthenticationModes.None, Confirm = true
+            }, lifetime.Token);
+            Assert.False(configured.Enabled);
+            Assert.Equal(HttpAuthenticationModes.None, configured.AuthenticationMode);
+            Assert.Equal(HttpStartupModes.Enabled, configured.StartupMode);
+            Assert.Equal(new[] { "127.0.0.1" }, configured.BindAddresses);
+            var applied = await client.ApplyHttpStartupAsync(lifetime.Token);
+            Assert.True(applied.Enabled);
+            Assert.True(applied.Running);
+            using (var http = new HttpClient { BaseAddress = new Uri(applied.Endpoint) })
+            using (var accepted = await SendInitializeAsync(http, "irrelevant-test-value", lifetime.Token))
+                Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+            var records = await client.ListHttpConnectionsAsync(lifetime.Token);
+            Assert.All(records.Connections, connection =>
+            {
+                Assert.Equal("anonymous", connection.AuthorizationState);
+                Assert.Empty(connection.ClientIds);
+            });
+            await client.ConfigureHttpServiceAsync(new ConfigureHttpServiceRequest { StartupMode = HttpStartupModes.Disabled }, lifetime.Token);
+            Assert.True((await client.GetHttpServiceStatusAsync(lifetime.Token)).Running);
+            Assert.False((await client.ApplyHttpStartupAsync(lifetime.Token)).Running);
+            var malformed = await NamedPipeFrameClient.ExchangeAsync(pipeName, JsonSerializer.Serialize(new DaemonRequest
+            {
+                RequestId = "malformed-startup", Method = DaemonProtocol.ApplyHttpStartup, PayloadJson = "null"
+            }), lifetime.Token);
+            Assert.Equal(ErrorCodes.InvalidRequest, JsonSerializer.Deserialize<DaemonResponse>(malformed,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web))!.Error!.Code);
+            await client.StopAsync(lifetime.Token);
+            await serverTask.WaitAsync(TimeSpan.FromSeconds(3), lifetime.Token);
+        }
+        finally
+        {
+            lifetime.Cancel();
+            try { await serverTask; }
+            catch (OperationCanceledException) { }
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData(99, "rejected-stop", ErrorCodes.ProtocolMismatch)]
     [InlineData(DaemonProtocol.Version, "", ErrorCodes.InvalidRequest)]
@@ -82,7 +145,8 @@ public sealed class DaemonServerTests
 
             var httpPort = GetFreePort();
             var configured = await daemonClient.ConfigureHttpServiceAsync(
-                new ConfigureHttpServiceRequest { BindMode = HttpBindModes.Loopback, Port = httpPort },
+                new ConfigureHttpServiceRequest { BindMode = HttpBindModes.Loopback, Port = httpPort,
+                    AuthenticationMode = HttpAuthenticationModes.Required },
                 TestContext.Current.CancellationToken);
             Assert.Equal(HttpBindModes.Loopback, configured.BindMode);
             Assert.Equal(httpPort, configured.Port);

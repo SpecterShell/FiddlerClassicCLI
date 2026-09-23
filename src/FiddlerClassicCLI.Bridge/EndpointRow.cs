@@ -1,4 +1,4 @@
-// Keeps a wrapping endpoint and its clipboard button on the same horizontal row.
+// Keeps a wrapping URL or named-pipe endpoint and its clipboard button on the same row.
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -6,26 +6,21 @@ namespace FiddlerClassicCLI.Bridge;
 
 internal sealed class EndpointRow : Panel
 {
-    private readonly Label _endpoint;
+    private readonly SelectableAddress _endpoint;
     private readonly ClipboardButton _copy;
-    private readonly string _copyCaption;
     private bool _layingOut;
-    /// <summary>Transfers ownership of an endpoint label and its adjacent copy button to this row.</summary>
-    /// <param name="endpoint">The full address label. Its text can wrap as the pane narrows.</param>
+    /// <summary>Transfers ownership of a selectable address and its adjacent copy button to this row.</summary>
+    /// <param name="endpoint">The full read-only address. Its text can wrap as the pane narrows.</param>
     /// <param name="copy">A copy action with an explicit accessible name for this address.</param>
-    internal EndpointRow(Label endpoint, ClipboardButton copy)
+    internal EndpointRow(SelectableAddress endpoint, ClipboardButton copy)
     {
         _endpoint = endpoint;
         _copy = copy;
-        _copyCaption = copy.Text;
-        copy.MnemonicText = _copyCaption;
         AutoSize = true;
         AutoSizeMode = AutoSizeMode.GrowAndShrink;
         Dock = DockStyle.Fill;
         Margin = Padding.Empty;
         TabStop = false;
-        endpoint.AutoSize = false;
-        endpoint.TextAlign = ContentAlignment.MiddleLeft;
         endpoint.TabIndex = 0;
         copy.TabIndex = 1;
         Controls.Add(endpoint);
@@ -47,8 +42,8 @@ internal sealed class EndpointRow : Panel
         _layingOut = true;
         try
         {
-            var copySize = MeasureCopy(ClientSize.Width, out var caption);
-            _copy.Text = caption;
+            var copySize = MeasureCopy(ClientSize.Width, out var compact);
+            _copy.Compact = compact;
             var textSize = MeasureEndpoint(ClientSize.Width, copySize.Width);
             _endpoint.Bounds = new Rectangle(_endpoint.Margin.Left,
                 Math.Max(_endpoint.Margin.Top, (ClientSize.Height - textSize.Height) / 2), textSize.Width, textSize.Height);
@@ -58,15 +53,14 @@ internal sealed class EndpointRow : Panel
         finally { _layingOut = false; }
     }
 
-    private Size MeasureCopy(int availableWidth, out string caption)
+    private Size MeasureCopy(int availableWidth, out bool compact)
     {
-        var fullSize = _copy.GetPreferredSizeForText(_copyCaption);
-        var minimumText = TextRenderer.MeasureText("http://", _endpoint.Font).Width;
-        // Keep the icon beside a readable URL even in a very narrow, high-DPI pane.
-        var compact = availableWidth > 0 && availableWidth < fullSize.Width + minimumText
+        var fullSize = _copy.GetPreferredSizeForText(_copy.MnemonicText);
+        var minimumText = TextRenderer.MeasureText("MMMMMM", _endpoint.Font).Width;
+        // Keep a readable address beside the action in a narrow, high-DPI pane.
+        compact = availableWidth > 0 && availableWidth < fullSize.Width + minimumText
             + _copy.Margin.Horizontal + _endpoint.Margin.Horizontal;
-        caption = compact ? string.Empty : _copyCaption;
-        return compact ? _copy.GetPreferredSizeForText(caption) : fullSize;
+        return _copy.GetPresentationSize(compact);
     }
 
     private Size MeasureEndpoint(int availableWidth, int copyWidth)

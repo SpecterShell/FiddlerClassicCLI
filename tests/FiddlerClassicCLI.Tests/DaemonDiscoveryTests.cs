@@ -34,7 +34,7 @@ public sealed class DaemonDiscoveryTests : IDisposable
         var action = operation switch
         {
             "status" => administration.GetServiceStatusAsync(deadline.Token),
-            "configure" => administration.ConfigureServiceAsync(HttpBindModes.Loopback, 9001, deadline.Token),
+            "configure" => administration.ConfigureServiceAsync(new ConfigureHttpServiceRequest { BindMode = HttpBindModes.Loopback, Port = 9001 }, deadline.Token),
             "enable" => administration.EnableServiceAsync(true, deadline.Token),
             "disable" => administration.DisableServiceAsync(true, deadline.Token),
             "authorize" => administration.AuthorizeClientAsync("Unexpected client", deadline.Token),

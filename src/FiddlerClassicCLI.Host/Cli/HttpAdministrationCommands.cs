@@ -1,6 +1,8 @@
 // Builds persistent MCP HTTP service, client, and connection administration commands.
 using System.CommandLine;
+using System.Net;
 using FiddlerClassicCLI.Host.Daemon;
+using FiddlerClassicCLI.Host.Services;
 using FiddlerClassicCLI.Protocol;
 using static FiddlerClassicCLI.Host.Cli.CommandHelpers;
 
@@ -24,30 +26,11 @@ internal static class HttpAdministrationCommands
             parseResult.GetValue(jsonOption),
             WriteHttpServiceStatus));
 
-        var configure = new Command("configure", "Change the bind mode or port while the service is disabled.");
-        var bind = new Option<string?>("--bind") { Description = "Bind mode: loopback or all." };
-        bind.AcceptOnlyFromAmong(HttpBindModes.Loopback, HttpBindModes.All);
-        var port = CreatePortOption("TCP port from 1 through 65535.");
-        configure.Options.Add(bind);
-        configure.Options.Add(port);
-        configure.Validators.Add(result =>
-        {
-            if (result.GetResult(bind) is not { Implicit: false }
-                && result.GetResult(port) is not { Implicit: false })
-            {
-                result.AddError("Specify --bind, --port, or both.");
-            }
-        });
-        configure.SetAction((parseResult, cancellationToken) => CliOutput.RunAsync(
-            () => administration.ConfigureServiceAsync(
-                parseResult.GetValue(bind),
-                parseResult.GetValue(port),
-                cancellationToken),
-            parseResult.GetValue(jsonOption),
-            WriteHttpServiceStatus));
-
         var enable = new Command("enable", "Enable and start the persistent MCP HTTP listener.");
-        var enableYes = new Option<bool>("--yes", "-y") { Description = "Acknowledge plaintext remote HTTP without prompting." };
+        var enableYes = new Option<bool>("--yes", "-y")
+        {
+            Description = "Acknowledge remote plaintext HTTP or unauthenticated access without prompting."
+        };
         enable.Options.Add(enableYes);
         enable.SetAction(async (parseResult, cancellationToken) =>
         {
@@ -56,15 +39,10 @@ internal static class HttpAdministrationCommands
             {
                 var current = await administration.GetServiceStatusAsync(cancellationToken).ConfigureAwait(false);
                 var confirmed = parseResult.GetValue(enableYes);
-                if (current.BindMode == HttpBindModes.All && !confirmed)
+                if (current.AuthenticationMode == HttpAuthenticationModes.None
+                    || IsRemoteBinding(current.BindMode, current.BindAddresses))
                 {
-                    confirmed = CliOutput.Confirm(
-                        "MCP HTTP on 0.0.0.0 sends bearer tokens without encryption. Continue?",
-                        yes: false);
-                    if (!confirmed)
-                    {
-                        return ConfirmationRequired(json);
-                    }
+                    confirmed = ConfirmListenerRisk(current.AuthenticationMode, atStartup: false, confirmed);
                 }
 
                 var result = await administration.EnableServiceAsync(confirmed, cancellationToken).ConfigureAwait(false);
@@ -107,10 +85,123 @@ internal static class HttpAdministrationCommands
         });
 
         service.Subcommands.Add(status);
-        service.Subcommands.Add(configure);
+        service.Subcommands.Add(CreateConfigure(administration, jsonOption));
         service.Subcommands.Add(enable);
         service.Subcommands.Add(disable);
         return service;
+    }
+
+    /// <summary>Builds explicit listener configuration with parser validation and security confirmation.</summary>
+    /// <param name="administration">The daemon-aware configuration client.</param>
+    /// <param name="jsonOption">The inherited machine-readable output option.</param>
+    private static Command CreateConfigure(HttpAdminClient administration, Option<bool> jsonOption)
+    {
+        var configure = new Command("configure",
+            "Configure MCP HTTP. Disable the service before changing bind addresses, port, or authentication.");
+        var bind = new Option<string?>("--bind") { Description = "Bind mode: loopback, all, or selected IPv4 addresses." };
+        bind.AcceptOnlyFromAmong(HttpBindModes.Loopback, HttpBindModes.All, HttpBindModes.Selected);
+        var addresses = new Option<string[]>("--address")
+        {
+            Description = $"Local IPv4 address to listen on (up to {HttpListenerLimits.MaximumSelectedAddresses}). Repeat as needed. Use --bind selected or saved selected mode.",
+            Arity = ArgumentArity.OneOrMore,
+            AllowMultipleArgumentsPerToken = true
+        };
+        addresses.Validators.Add(result =>
+        {
+            if (result.Tokens.Count > HttpListenerLimits.MaximumSelectedAddresses)
+                result.AddError($"Specify at most {HttpListenerLimits.MaximumSelectedAddresses} --address values.");
+            foreach (var token in result.Tokens)
+            {
+                if (!HttpListenerSettings.IsUnicastAddress(token.Value))
+                {
+                    result.AddError("Each --address must be an IPv4 unicast address in dotted-decimal form.");
+                }
+            }
+        });
+        var port = CreatePortOption("TCP port from 1 through 65535.");
+        var startup = new Option<string?>("--startup")
+        {
+            Description = "Startup policy: enabled, disabled, or last-state. Applies when the daemon starts or Fiddler opens."
+        };
+        startup.AcceptOnlyFromAmong(HttpStartupModes.Enabled, HttpStartupModes.Disabled, HttpStartupModes.LastState);
+        var authentication = new Option<string?>("--authentication")
+        {
+            Description = "Authentication: required (bearer token for all clients), non-loopback (bearer token for non-loopback clients), or none (requires confirmation)."
+        };
+        authentication.AcceptOnlyFromAmong(
+            HttpAuthenticationModes.Required, HttpAuthenticationModes.NonLoopback, HttpAuthenticationModes.None);
+        foreach (var option in new[] { bind, startup, authentication })
+        {
+            // Required string options can consume the next flag as a value before enum validation.
+            option.Validators.Add(result =>
+            {
+                if (!result.Implicit && (result.Tokens.Count == 0
+                    || result.Tokens.Any(token => token.Value.StartsWith('-'))))
+                    result.AddError($"Option '{option.Name}' requires a value.");
+            });
+        }
+        var yes = new Option<bool>("--yes", "-y")
+        {
+            Description = "Acknowledge unauthenticated access or automatic remote startup without prompting."
+        };
+        AddOptions(configure, bind, addresses, port, startup, authentication, yes);
+        configure.Validators.Add(result =>
+        {
+            if (!new Option[] { bind, addresses, port, startup, authentication }
+                .Any(option => result.GetResult(option) is { Implicit: false }))
+            {
+                result.AddError("Specify --bind, --address, --port, --startup, or --authentication.");
+            }
+            // Validate relationships from tokens so failed enum conversions remain parser errors.
+            var hasAddresses = result.GetResult(addresses)?.Tokens.Count > 0;
+            var mode = result.GetResult(bind)?.Tokens.FirstOrDefault()?.Value;
+            if (hasAddresses && mode is not null && mode != HttpBindModes.Selected)
+                result.AddError("--address requires selected bind mode.");
+            if (mode == HttpBindModes.Selected && !hasAddresses)
+                result.AddError("--bind selected requires at least one --address.");
+        });
+        configure.SetAction((parseResult, cancellationToken) => CliOutput.RunAsync(async () =>
+        {
+            var request = new ConfigureHttpServiceRequest
+            {
+                BindMode = parseResult.GetValue(bind),
+                BindAddresses = parseResult.GetResult(addresses) is { Implicit: false }
+                    ? parseResult.GetValue(addresses) : null,
+                Port = parseResult.GetValue(port),
+                StartupMode = parseResult.GetValue(startup),
+                AuthenticationMode = parseResult.GetValue(authentication),
+                Confirm = parseResult.GetValue(yes)
+            };
+            var current = await administration.GetServiceStatusAsync(cancellationToken).ConfigureAwait(false);
+            var authenticationMode = request.AuthenticationMode ?? current.AuthenticationMode;
+            var startsEnabled = (request.StartupMode ?? current.StartupMode) == HttpStartupModes.Enabled;
+            if (request.AuthenticationMode == HttpAuthenticationModes.None
+                || (startsEnabled && (authenticationMode == HttpAuthenticationModes.None
+                    || IsRemoteBinding(request.BindMode ?? current.BindMode, request.BindAddresses ?? current.BindAddresses))))
+            {
+                request.Confirm = ConfirmListenerRisk(authenticationMode, startsEnabled, request.Confirm);
+            }
+            return await administration.ConfigureServiceAsync(request, cancellationToken).ConfigureAwait(false);
+        }, parseResult.GetValue(jsonOption), WriteHttpServiceStatus));
+        return configure;
+    }
+
+    private static bool IsRemoteBinding(string mode, string[] addresses) => mode == HttpBindModes.All
+        || (mode == HttpBindModes.Selected && addresses.Any(address =>
+            !IPAddress.TryParse(address, out var parsed) || !IPAddress.IsLoopback(parsed)));
+
+    private static bool ConfirmListenerRisk(string authenticationMode, bool atStartup, bool yes)
+    {
+        var warning = authenticationMode == HttpAuthenticationModes.None
+            ? "Anyone who can reach MCP HTTP can control Fiddler without a token when authentication is disabled."
+            : "Remote MCP HTTP sends bearer credentials without encryption. Anyone who observes a credential can reuse it.";
+        if (atStartup) warning += " MCP HTTP will be enabled automatically at startup.";
+        if (!CliOutput.Confirm(warning + " Continue?", yes))
+        {
+            throw new HttpAdministrationException(ErrorCodes.ConfirmationRequired,
+                warning + " Use --yes to confirm in non-interactive use.");
+        }
+        return true;
     }
 
     /// <summary>
@@ -224,14 +315,28 @@ internal static class HttpAdministrationCommands
     {
         Console.WriteLine($"MCP HTTP enabled:     {status.Enabled}");
         Console.WriteLine($"MCP HTTP running:     {status.Running}");
+        Console.WriteLine($"Startup policy:       {status.StartupMode}");
+        var authentication = status.AuthenticationMode switch
+        {
+            HttpAuthenticationModes.Required => "required (bearer token for all clients)",
+            HttpAuthenticationModes.NonLoopback => "non-loopback (bearer token required outside loopback)",
+            HttpAuthenticationModes.None => "none (unauthenticated access)",
+            _ => status.AuthenticationMode
+        };
+        Console.WriteLine($"Authentication:       {authentication}");
         Console.WriteLine($"Bind:                 {status.BindAddress}:{status.Port} ({status.BindMode})");
-        Console.WriteLine($"Loopback endpoint:    http://127.0.0.1:{status.Port}/mcp");
+        foreach (var endpoint in status.Endpoints)
+            Console.WriteLine($"Listener endpoint:    {endpoint}");
+        if (!string.IsNullOrEmpty(status.LoopbackEndpoint))
+            Console.WriteLine($"Loopback endpoint:    {status.LoopbackEndpoint}");
         if (status.BindMode == HttpBindModes.All)
         {
             foreach (var endpoint in (status.LanEndpoints ?? Array.Empty<string>()).Take(8))
                 Console.WriteLine($"LAN endpoint hint:    {endpoint}");
             Console.WriteLine("LAN hints are local adapter addresses. Check remote reachability from the client.");
         }
+        foreach (var address in status.AvailableInterfaces)
+            Console.WriteLine($"Available interface:  {address.Address} ({address.AdapterName})");
         Console.WriteLine($"Active connections:   {status.ActiveConnectionCount}");
         if (!string.IsNullOrWhiteSpace(status.LastError))
         {

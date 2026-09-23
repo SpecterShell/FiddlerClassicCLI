@@ -179,9 +179,12 @@ internal sealed class DiagnosticExportService
         {
             Enabled = status.Enabled,
             Running = status.Running,
-            BindMode = status.BindMode is HttpBindModes.Loopback or HttpBindModes.All ? status.BindMode : null,
+            BindMode = status.BindMode is HttpBindModes.Loopback or HttpBindModes.All or HttpBindModes.Selected ? status.BindMode : null,
             BindAddress = status.BindAddress is "127.0.0.1" or "0.0.0.0" ? status.BindAddress : null,
-            Port = status.Port is >= 1 and <= 65535 ? status.Port : null
+            Port = status.Port is >= 1 and <= 65535 ? status.Port : null,
+            StartupMode = status.StartupMode is HttpStartupModes.Enabled or HttpStartupModes.Disabled or HttpStartupModes.LastState
+                ? status.StartupMode : null,
+            AuthenticationMode = HttpAuthenticationModes.IsValid(status.AuthenticationMode) ? status.AuthenticationMode : null
         };
     }
 

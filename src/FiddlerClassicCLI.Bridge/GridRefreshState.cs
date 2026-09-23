@@ -1,4 +1,4 @@
-// Preserves selection, sorting, and viewport when a status grid replaces its snapshot.
+// Preserves selection, sorting, and viewport across an incremental status-grid update.
 using System.ComponentModel;
 using System.Windows.Forms;
 
@@ -14,12 +14,15 @@ internal sealed class GridRefreshState : IDisposable
     private readonly int _horizontalOffset;
     private readonly DataGridViewColumn? _sortedColumn;
     private readonly SortOrder _sortOrder;
+    private readonly bool _sortRows;
 
-    /// <summary>Snapshots the view before rebuilding rows, whose tags must be stable IDs.</summary>
+    /// <summary>Snapshots the view before changing rows, whose tags must be stable IDs.</summary>
     /// <param name="grid">The UI-thread-owned status grid.</param>
-    public GridRefreshState(DataGridView grid)
+    /// <param name="sortRows">Whether membership or values in the sorted column changed.</param>
+    public GridRefreshState(DataGridView grid, bool sortRows)
     {
         _grid = grid;
+        _sortRows = sortRows;
         _selectedId = grid.SelectedRows.Count == 0 ? null : grid.SelectedRows[0].Tag as string;
         _firstRowIndex = grid.FirstDisplayedScrollingRowIndex;
         _firstRowId = _firstRowIndex < 0 ? null : grid.Rows[_firstRowIndex].Tag as string;
@@ -31,18 +34,22 @@ internal sealed class GridRefreshState : IDisposable
 
     public void Dispose()
     {
-        if (_sortedColumn is not null && _sortOrder != SortOrder.None)
+        if (_sortRows && _sortedColumn is not null && _sortOrder != SortOrder.None)
         {
             _grid.Sort(_sortedColumn, _sortOrder == SortOrder.Ascending
                 ? ListSortDirection.Ascending : ListSortDirection.Descending);
         }
 
-        _grid.CurrentCell = null;
-        _grid.ClearSelection();
         var selected = FindRow(_selectedId);
-        if (selected is not null)
+        var cell = selected?.Cells[_columnIndex];
+        if (_grid.CurrentCell != cell) _grid.CurrentCell = cell;
+        if (selected is null)
         {
-            _grid.CurrentCell = selected.Cells[_columnIndex];
+            if (_grid.SelectedRows.Count > 0) _grid.ClearSelection();
+        }
+        else if (!selected.Selected)
+        {
+            _grid.ClearSelection();
             selected.Selected = true;
         }
 
@@ -50,10 +57,11 @@ internal sealed class GridRefreshState : IDisposable
         if (_firstRowIndex >= 0 && _grid.RowCount > 0)
         {
             var first = FindRow(_firstRowId);
-            _grid.FirstDisplayedScrollingRowIndex = first?.Index ?? Math.Min(_firstRowIndex, _grid.RowCount - 1);
+            var index = first?.Index ?? Math.Min(_firstRowIndex, _grid.RowCount - 1);
+            if (_grid.FirstDisplayedScrollingRowIndex != index) _grid.FirstDisplayedScrollingRowIndex = index;
         }
 
-        _grid.HorizontalScrollingOffset = _horizontalOffset;
+        if (_grid.HorizontalScrollingOffset != _horizontalOffset) _grid.HorizontalScrollingOffset = _horizontalOffset;
     }
 
     private DataGridViewRow? FindRow(string? id) => id is null ? null

@@ -49,6 +49,9 @@ public sealed class ConfigAndAuthTests : IDisposable
         Assert.False(configuration.HttpServiceEnabled);
         Assert.Equal(FiddlerClassicCLI.Protocol.HttpBindModes.Loopback, configuration.HttpBindMode);
         Assert.Empty(configuration.AuthorizedHttpClients);
+        Assert.Equal(HttpAuthenticationModes.NonLoopback, configuration.HttpAuthenticationMode);
+        Assert.Equal(HttpStartupModes.LastState, configuration.HttpStartupMode);
+        Assert.Empty(configuration.HttpBindAddresses);
         Assert.False(string.IsNullOrWhiteSpace(configuration.HttpDefaultTokenCreatedAtUtc));
     }
 

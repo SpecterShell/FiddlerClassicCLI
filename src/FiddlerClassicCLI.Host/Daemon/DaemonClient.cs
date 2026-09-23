@@ -208,6 +208,12 @@ internal sealed class DaemonClient
             cancellationToken);
     }
 
+    public Task<HttpServiceStatus> ApplyHttpStartupAsync(CancellationToken cancellationToken = default)
+    {
+        return SendManagedHttpAsync<EmptyRequest, HttpServiceStatus>(
+            DaemonProtocol.ApplyHttpStartup, new EmptyRequest(), cancellationToken);
+    }
+
     public Task<HttpServiceStatus> EnableHttpServiceAsync(
         bool confirm,
         CancellationToken cancellationToken = default)
@@ -287,7 +293,7 @@ internal sealed class DaemonClient
         {
             throw new DaemonClientException(
                 ErrorCodes.ProtocolMismatch,
-                "The running CLI daemon predates managed MCP HTTP support. Stop and restart the daemon.");
+                "The running CLI daemon does not support the current MCP HTTP settings. Install the matching CLI and bridge, then stop and restart the daemon.");
         }
 
         return await SendAsync<TResponse>(

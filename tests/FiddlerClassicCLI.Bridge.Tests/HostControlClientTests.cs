@@ -6,7 +6,7 @@ using FiddlerClassicCLI.Protocol;
 
 namespace FiddlerClassicCLI.Bridge.Tests;
 
-public sealed class HostControlClientTests
+public sealed partial class HostControlClientTests
 {
     [Theory]
     [InlineData(false)]
@@ -68,7 +68,11 @@ public sealed class HostControlClientTests
         {
             RequestId = request.RequestId,
             Success = true,
-            PayloadJson = serializer.Serialize(new HttpServiceStatus { Port = 9001 })
+            PayloadJson = serializer.Serialize(new DaemonStatus
+            {
+                Capabilities = new[] { DaemonProtocol.ManagedHttpCapability },
+                HttpService = new HttpServiceStatus { Port = 9001 }
+            })
         }), deadline.Token);
         Assert.Equal(9001, (await exchange).Port);
     }
@@ -80,6 +84,45 @@ public sealed class HostControlClientTests
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
         await Assert.ThrowsAsync<TimeoutException>(() => client.GetServiceStatusAsync(deadline.Token));
         Assert.False(deadline.IsCancellationRequested);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SendsStartupAndCompleteConfigurationContracts(bool startup)
+    {
+        using var server = CreateServer(out var pipeName);
+        var client = new HostControlClient(pipeName, TimeSpan.FromSeconds(5));
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var configuration = new ConfigureHttpServiceRequest
+        {
+            BindMode = HttpBindModes.Selected, BindAddresses = new[] { "127.0.0.1", "10.0.0.2" }, Port = 9012,
+            StartupMode = HttpStartupModes.Enabled, AuthenticationMode = HttpAuthenticationModes.None, Confirm = true
+        };
+        var exchange = startup ? client.ApplyStartupAsync(deadline.Token) : client.ConfigureServiceAsync(configuration, deadline.Token);
+        await RespondToCapabilityCheckAsync(server, DaemonProtocol.ManagedHttpCapability, deadline.Token);
+        await server.WaitForConnectionAsync(deadline.Token);
+        var serializer = new JavaScriptSerializer();
+        var request = serializer.Deserialize<DaemonRequest>(await FrameCodec.ReadAsync(server, deadline.Token));
+        Assert.Equal(startup ? DaemonProtocol.ApplyHttpStartup : DaemonProtocol.ConfigureHttpService, request.Method);
+        if (!startup)
+        {
+            var payload = serializer.Deserialize<ConfigureHttpServiceRequest>(request.PayloadJson);
+            Assert.Equal(configuration.BindMode, payload.BindMode);
+            Assert.Equal(configuration.BindAddresses, payload.BindAddresses);
+            Assert.Equal(configuration.Port, payload.Port);
+            Assert.Equal(configuration.StartupMode, payload.StartupMode);
+            Assert.Equal(HttpAuthenticationModes.None, payload.AuthenticationMode);
+            Assert.True(payload.Confirm);
+        }
+        await FrameCodec.WriteAsync(server, serializer.Serialize(new DaemonResponse
+        {
+            RequestId = request.RequestId, Success = true,
+            PayloadJson = serializer.Serialize(new HttpServiceStatus { AuthenticationMode = HttpAuthenticationModes.None, StartupMode = HttpStartupModes.Enabled })
+        }), deadline.Token);
+        var result = await exchange;
+        Assert.Equal(HttpAuthenticationModes.None, result.AuthenticationMode);
+        Assert.Equal(HttpStartupModes.Enabled, result.StartupMode);
     }
 
     private static NamedPipeServerStream CreateServer(out string pipeName)

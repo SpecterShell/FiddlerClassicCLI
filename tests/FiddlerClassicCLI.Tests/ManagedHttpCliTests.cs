@@ -11,43 +11,63 @@ using FiddlerClassicCLI.Protocol;
 
 namespace FiddlerClassicCLI.Tests;
 
-public sealed class ManagedHttpCliTests : IDisposable
+public sealed partial class ManagedHttpCliTests : IDisposable
 {
     private readonly string _directory = Path.Combine(
         Path.GetTempPath(),
         "FiddlerClassicCLITests",
         Guid.NewGuid().ToString("N"));
 
-    [Fact]
-    public void StatusAndDisableDoNotStartAStoppedDaemon()
+    [Theory]
+    [InlineData(HttpAuthenticationModes.Required)]
+    [InlineData(HttpAuthenticationModes.NonLoopback)]
+    [InlineData(HttpAuthenticationModes.None)]
+    public void StatusAndDisableDoNotStartAStoppedDaemon(string authenticationMode)
     {
         var (root, store) = CreateRoot();
-        store.SetHttpServiceEnabled(true);
+        store.ConfigureHttpService(new ConfigureHttpServiceRequest
+        {
+            AuthenticationMode = authenticationMode,
+            StartupMode = HttpStartupModes.Enabled,
+            Confirm = true
+        });
+        store.SetHttpServiceEnabled(true, confirm: true);
+        var before = File.ReadAllText(store.ConfigPath);
 
         var status = Invoke(root, "mcp", "service", "status", "--json");
+        Assert.True(before == File.ReadAllText(store.ConfigPath), "Reading status must not change saved listener settings.");
         var disabled = Invoke(root, "mcp", "service", "disable", "--yes", "--json");
 
         Assert.Equal(0, status.ExitCode);
+        Assert.Empty(status.StandardError);
         using (var statusJson = JsonDocument.Parse(status.StandardOutput))
         {
             Assert.True(statusJson.RootElement.GetProperty("enabled").GetBoolean());
             Assert.False(statusJson.RootElement.GetProperty("running").GetBoolean());
+            Assert.Equal(authenticationMode, statusJson.RootElement.GetProperty("authenticationMode").GetString());
+            Assert.False(statusJson.RootElement.TryGetProperty("requireAuthentication", out _));
         }
 
         Assert.Equal(0, disabled.ExitCode);
         Assert.False(store.GetOrCreate().HttpServiceEnabled);
     }
 
-    [Fact]
-    public async Task UnresponsiveDaemonReturnsTimeoutWithoutOfflineDisable()
+    [Theory]
+    [InlineData("disable")]
+    [InlineData("configure")]
+    public async Task UnresponsiveDaemonReturnsTimeoutWithoutOfflineMutation(string operation)
     {
         var pipeName = $"fiddler-classic-cli.http-tests.{Guid.NewGuid():N}";
         var (root, store) = CreateRoot(pipeName);
         store.SetHttpServiceEnabled(true);
+        var before = File.ReadAllText(store.ConfigPath);
         using var server = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1,
             PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var invocation = Task.Run(() => Invoke(root, "mcp", "service", "disable", "--yes", "--json"), deadline.Token);
+        string[] arguments = operation == "configure"
+            ? ["mcp", "service", "configure", "--startup", "disabled", "--yes", "--json"]
+            : ["mcp", "service", "disable", "--yes", "--json"];
+        var invocation = Task.Run(() => Invoke(root, arguments), deadline.Token);
         await server.WaitForConnectionAsync(deadline.Token);
         Assert.NotNull(await FrameCodec.ReadAsync(server, deadline.Token));
 
@@ -57,13 +77,14 @@ public sealed class ManagedHttpCliTests : IDisposable
         Assert.Empty(result.StandardOutput);
         Assert.Contains(ErrorCodes.Timeout, result.StandardError, StringComparison.Ordinal);
         Assert.True(store.GetOrCreate().HttpServiceEnabled);
+        Assert.True(before == File.ReadAllText(store.ConfigPath), "Unresponsive daemons must not permit offline configuration writes.");
     }
 
     [Fact]
     public void RemoteEnablementRequiresNonInteractiveConfirmation()
     {
         var (root, store) = CreateRoot();
-        store.ConfigureHttpService(HttpBindModes.All, 8877);
+        store.ConfigureHttpService(new ConfigureHttpServiceRequest { BindMode = HttpBindModes.All, Port = 8877 });
 
         var result = Invoke(root, "mcp", "service", "enable", "--json");
 
@@ -113,6 +134,19 @@ public sealed class ManagedHttpCliTests : IDisposable
         Assert.Equal(ExitCodes.Unavailable, result.ExitCode);
         Assert.Contains("managed MCP HTTP service", result.StandardError, StringComparison.Ordinal);
         Assert.DoesNotContain("listening on", result.StandardError, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("--authentication", HttpAuthenticationModes.Required)]
+    [InlineData("--authentication", HttpAuthenticationModes.NonLoopback)]
+    [InlineData("--authentication", HttpAuthenticationModes.None)]
+    [InlineData("--bind", HttpBindModes.All)]
+    public void ForegroundServerDoesNotAcceptManagedListenerOptions(string option, string value)
+    {
+        var (root, store) = CreateRoot();
+
+        Assert.NotEmpty(root.Parse(["mcp", "http", option, value]).Errors);
+        Assert.False(File.Exists(store.ConfigPath));
     }
 
     private (RootCommand Root, ConfigStore Store) CreateRoot(string? pipeName = null)

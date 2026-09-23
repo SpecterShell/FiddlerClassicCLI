@@ -19,7 +19,11 @@ internal sealed class BridgeHostLifetime : IDisposable
     {
         try
         {
-            await Task.Run(() => client.EnsureStartedAsync(cancellationToken), cancellationToken).ConfigureAwait(false);
+            var startup = await Task.Run(() => client.EnsureStartedAsync(cancellationToken), cancellationToken).ConfigureAwait(false);
+            // A fresh daemon applies its policy during initialization. Applying it again could
+            // overwrite a user's enable/disable action between startup and discovery completion.
+            if (startup == HostStartResult.Reused)
+                await client.ApplyStartupAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

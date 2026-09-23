@@ -36,7 +36,8 @@ public sealed class HttpEndpointResolverTests
         Assert.Equal("http://127.0.0.1:9101/mcp", status.LoopbackEndpoint);
         Assert.True(status.Enabled);
         Assert.True(status.Running);
-        Assert.Equal(mode == HttpBindModes.All ? 1 : 0, readCount);
+        Assert.Equal(1, readCount);
+        Assert.Equal(3, status.AvailableInterfaces.Length);
         Assert.Equal(mode == HttpBindModes.All
             ? new[] { "http://10.0.0.2:9101/mcp", "http://192.168.10.4:9101/mcp" }
             : Array.Empty<string>(), status.LanEndpoints);
@@ -90,6 +91,39 @@ public sealed class HttpEndpointResolverTests
         Assert.Empty(old.LanEndpoints);
         Assert.Empty(old.LoopbackEndpoint);
         Assert.Equal(1, DaemonProtocol.Version);
+    }
+
+    [Fact]
+    public void SelectedBindingsAdvertiseOnlyTheirActualEndpoints()
+    {
+        var status = HttpEndpointResolver.Populate(new HttpServiceStatus
+        {
+            BindMode = HttpBindModes.Selected, BindAddresses = ["10.0.0.4", "192.168.1.2"], Port = 9001
+        }, () => [Adapter("10.0.0.4", "192.168.1.2", "10.0.0.9")]);
+        Assert.Empty(status.LoopbackEndpoint);
+        Assert.Equal(new[] { "http://10.0.0.4:9001/mcp", "http://192.168.1.2:9001/mcp" }, status.Endpoints);
+        Assert.Equal(status.Endpoints, status.LanEndpoints);
+        Assert.Equal(status.Endpoints[0], status.Endpoint);
+        Assert.Contains(status.AvailableInterfaces, item => item.Address == "10.0.0.9");
+        status.BindAddresses = ["127.0.0.1", "10.0.0.4"];
+        HttpEndpointResolver.Populate(status, () => []);
+        Assert.Equal("http://127.0.0.1:9001/mcp", status.LoopbackEndpoint);
+        Assert.Equal(new[] { "http://10.0.0.4:9001/mcp" }, status.LanEndpoints);
+    }
+
+    [Fact]
+    public void InterfaceChoicesAreNamedDeduplicatedAndBoundedEvenInLoopbackMode()
+    {
+        var status = HttpEndpointResolver.Populate(new HttpServiceStatus(), () =>
+        [
+            new(OperationalStatus.Up, NetworkInterfaceType.Ethernet,
+                () => Enumerable.Range(1, 100).Select(index => IPAddress.Parse($"10.0.0.{index}")), "Test adapter")
+        ]);
+        Assert.Equal(HttpListenerLimits.MaximumAvailableInterfaces, status.AvailableInterfaces.Length);
+        Assert.Contains(status.AvailableInterfaces, item => item.Address == "127.0.0.1" && item.AdapterName == "Loopback");
+        Assert.All(status.AvailableInterfaces.Where(item => item.Address != "127.0.0.1"), item => Assert.Equal("Test adapter", item.AdapterName));
+        Assert.Empty(status.LanEndpoints);
+        Assert.Equal(HttpListenerLimits.MaximumAvailableInterfaces, status.AvailableInterfaces.Select(item => item.Address).Distinct().Count());
     }
 
     private static HttpEndpointResolver.Adapter Adapter(params string[] addresses) =>

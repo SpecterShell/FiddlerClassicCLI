@@ -13,7 +13,7 @@ public sealed partial class BridgeControlPanelTests
         var client = new FakeHostControlClient();
         using var panel = new BridgeControlPanel(client);
         CompleteRefresh(panel);
-        var bind = Descendants(panel).OfType<ComboBox>().Single();
+        var bind = Named<ComboBox>(panel, "Listener bind mode");
         var port = Descendants(panel).OfType<NumericUpDown>().Single();
         bind.SelectedItem = HttpBindModes.All;
         port.Value = 9002;
@@ -23,13 +23,13 @@ public sealed partial class BridgeControlPanelTests
         CompleteRefresh(panel);
         Assert.Equal(HttpBindModes.All, bind.SelectedItem);
         Assert.Equal(9002, port.Value);
-        Assert.False(Button(panel, "Enable").Enabled);
+        Assert.False(Named<CheckBox>(panel, "Enable MCP HTTP service").Enabled);
 
         Button(panel, "Apply").PerformClick();
         PumpUntilIdle(panel);
         Assert.Equal(9002, client.Service.Port);
         Assert.Equal(HttpBindModes.All, client.Service.BindMode);
-        Assert.True(Button(panel, "Enable").Enabled);
+        Assert.True(Named<CheckBox>(panel, "Enable MCP HTTP service").Enabled);
         client.Service = new HttpServiceStatus { Port = 9010 };
         CompleteRefresh(panel);
         Assert.Equal(9010, port.Value);
@@ -112,7 +112,7 @@ public sealed partial class BridgeControlPanelTests
     });
 
     [Fact]
-    public void AdoptsRunningSettingsWhenAnotherClientEnablesTheService() => RunOnSta(() =>
+    public void PreservesUnsavedListenerEditsWhenAnotherClientEnablesTheService() => RunOnSta(() =>
     {
         var client = new FakeHostControlClient();
         using var panel = new BridgeControlPanel(client);
@@ -121,9 +121,10 @@ public sealed partial class BridgeControlPanelTests
         port.Value = 9500;
         client.Service = new HttpServiceStatus { Enabled = true, Running = true, Port = 9000 };
         CompleteRefresh(panel);
-        Assert.Equal(9000, port.Value);
-        Assert.False(panel.ServiceSettingsEnabled);
-        Assert.True(Button(panel, "Disable").Enabled);
+        Assert.Equal(9500, port.Value);
+        Assert.True(panel.ServiceSettingsEnabled);
+        Assert.True(Named<CheckBox>(panel, "Enable MCP HTTP service").Enabled);
+        Assert.True(Named<CheckBox>(panel, "Enable MCP HTTP service").Checked);
     });
 
     [Fact]
@@ -143,7 +144,12 @@ public sealed partial class BridgeControlPanelTests
 
     private static Button Button(Control parent, string text) => Descendants(parent).OfType<Button>().Single(button => button.Text.Replace("&", string.Empty) == text);
 
-    private static void CompleteRefresh(BridgeControlPanel panel) => PumpUntilCompleted(panel.RefreshForTestingAsync());
+    private static void CompleteRefresh(BridgeControlPanel panel)
+    {
+        panel.CreateControl();
+        PumpUntilIdle(panel);
+        PumpUntilCompleted(panel.RefreshForTestingAsync());
+    }
 
     private static void PumpUntilIdle(BridgeControlPanel panel)
     {

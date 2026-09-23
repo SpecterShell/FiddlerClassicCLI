@@ -19,9 +19,9 @@ public sealed partial class BridgeControlPanelTests
         using var panel = new BridgeControlPanel(client);
         Assert.False(Named<Button>(panel, "Copy loopback endpoint").Enabled);
         CompleteRefresh(panel);
-        Assert.Equal("http://127.0.0.1:9101/mcp", Named<Label>(panel, "Loopback endpoint").Text);
+        Assert.Equal("http://127.0.0.1:9101/mcp", Named<SelectableAddress>(panel, "Loopback endpoint").Text);
         Assert.Equal("http://192.168.1.4:9101/mcp", Named<Button>(panel, "Copy LAN endpoint 1").AccessibleDescription);
-        Assert.DoesNotContain(Descendants(panel).OfType<Label>(), label => label.Text.Contains("http://0.0.0.0"));
+        Assert.DoesNotContain(Descendants(panel).OfType<SelectableAddress>(), address => address.Text.Contains("http://0.0.0.0"));
         var lanCopy = Named<Button>(panel, "Copy LAN endpoint 1");
         client.PendingService = new TaskCompletionSource<HttpServiceStatus>();
         var refresh = panel.RefreshForTestingAsync();
@@ -44,7 +44,7 @@ public sealed partial class BridgeControlPanelTests
         };
         using var panel = new BridgeControlPanel(client);
         CompleteRefresh(panel);
-        Assert.Equal("http://127.0.0.1:9101/mcp", Named<Label>(panel, "Loopback endpoint").Text);
+        Assert.Equal("http://127.0.0.1:9101/mcp", Named<SelectableAddress>(panel, "Loopback endpoint").Text);
         Assert.DoesNotContain(Descendants(panel).OfType<Button>(), button => button.AccessibleName.StartsWith("Copy LAN"));
         client.Service = AllInterfaceStatus();
         CompleteRefresh(panel);
@@ -80,20 +80,23 @@ public sealed partial class BridgeControlPanelTests
     {
         using var panel = new BridgeControlPanel(new FakeHostControlClient { Service = AllInterfaceStatus() });
         CompleteRefresh(panel);
-        var focusable = KeyboardControls(panel).Where(control => control is System.Windows.Forms.Button or ComboBox or NumericUpDown or DataGridView).ToArray();
+        var focusable = KeyboardControls(panel).Where(control => control is System.Windows.Forms.Button or CheckBox or SelectableAddress or ComboBox or NumericUpDown or DataGridView or LinkLabel).ToArray();
         Assert.Equal(new[]
         {
-            "Copy loopback endpoint", "Listener bind mode", "Listener port", "Apply listener settings", "Enable MCP HTTP service",
-            "Refresh service status", "Copy LAN endpoint 1", "Copy LAN endpoint 2",
+            "Enable MCP HTTP service", "Listener bind mode", "Listener port", "Apply listener settings",
+            "Refresh service status", "Loopback endpoint", "Copy loopback endpoint", "LAN endpoint 1", "Copy LAN endpoint 1", "LAN endpoint 2", "Copy LAN endpoint 2",
             "Authorized clients", "Authorize HTTP client", "Deauthorize selected HTTP client", "Rotate default CLI token",
             "Active connections", "Disconnect selected HTTP connection",
-            "Copy bridge pipe path", "Copy daemon pipe path", "Refresh named pipes"
+            "Bridge pipe path", "Copy bridge pipe path", "Daemon pipe path", "Copy daemon pipe path", "Refresh named pipes",
+            "MCP startup mode", "MCP authentication mode", "Save MCP settings", "Project link", "Documentation link"
         }, focusable.Select(control => control.AccessibleName));
         Assert.All(Descendants(panel).Where(control => control is Label or GroupBox), control => Assert.False(string.IsNullOrWhiteSpace(control.AccessibleName)));
         Assert.All(focusable.OfType<Button>(), button => Assert.Contains("&",
             button is ClipboardButton copy && copy.Text.Length == 0 ? copy.MnemonicText : button.Text));
         AssertMnemonicTarget(panel, "&Bind", "Listener bind mode");
         AssertMnemonicTarget(panel, "&Port", "Listener port");
+        AssertMnemonicTarget(panel, "&Startup", "MCP startup mode");
+        AssertMnemonicTarget(panel, "&Authentication", "MCP authentication mode");
         Assert.False(Named<Label>(panel, "Service error").UseMnemonic);
         Assert.False(Named<Label>(panel, "Component versions").UseMnemonic);
     });
@@ -170,9 +173,11 @@ public sealed partial class BridgeControlPanelTests
 
     private static void AssertContentFits(Control root)
     {
+        if (root is BridgeControlPanel) LayoutAllTabs(root);
         // Dialogs remain hidden during these checks, so inspect their layout regardless of Visible.
         foreach (var control in Descendants(root).Where(control => control is Label or System.Windows.Forms.Button or TextBox))
         {
+            if (control is Label { Text.Length: 0 }) continue; // Empty message rows intentionally collapse.
             Assert.True(control.Right <= control.Parent!.ClientSize.Width, $"{control.AccessibleName}: {control.Bounds} / {control.Parent.ClientRectangle}");
             Assert.True(control.Bottom <= control.Parent.ClientSize.Height, $"{control.AccessibleName} extends below its container.");
             if (control is Label)

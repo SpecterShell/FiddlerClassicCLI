@@ -18,7 +18,7 @@ internal sealed class ContentGroupBox : GroupBox
         Dock = DockStyle.Top;
         AutoSize = true;
         AutoSizeMode = AutoSizeMode.GrowAndShrink;
-        Padding = new Padding(10);
+        Padding = PanelStyle.SectionPadding;
         content.Dock = DockStyle.Top;
         Controls.Add(content);
     }

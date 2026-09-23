@@ -25,11 +25,11 @@ internal sealed class HttpConnectionRegistry
         }
     }
 
-    public void BeginRequest(string connectionId, HttpClientIdentity? identity)
+    public void BeginRequest(string connectionId, HttpClientIdentity? identity, bool anonymous = false)
     {
         if (_connections.TryGetValue(connectionId, out var connection))
         {
-            connection.BeginRequest(identity);
+            connection.BeginRequest(identity, anonymous);
         }
     }
 
@@ -97,20 +97,25 @@ internal sealed class HttpConnectionRegistry
         private long _totalRequestCount;
         private int _activeRequestCount;
         private bool _rejected;
+        private bool _anonymous;
 
         public TrackedConnection(ConnectionContext context)
         {
             _context = context;
         }
 
-        public void BeginRequest(HttpClientIdentity? identity)
+        public void BeginRequest(HttpClientIdentity? identity, bool anonymous)
         {
             lock (_sync)
             {
                 _lastActivityAtUtc = DateTime.UtcNow;
                 _totalRequestCount++;
                 _activeRequestCount++;
-                if (identity is null)
+                if (anonymous)
+                {
+                    _anonymous = true;
+                }
+                else if (identity is null)
                 {
                     _rejected = true;
                 }
@@ -177,7 +182,7 @@ internal sealed class HttpConnectionRegistry
                 return "authorized";
             }
 
-            return _rejected ? "rejected" : "pending";
+            return _rejected ? "rejected" : _anonymous ? "anonymous" : "pending";
         }
     }
 }

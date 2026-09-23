@@ -14,6 +14,7 @@ public sealed partial class BridgeControlPanelTests
         using var lifetime = new BridgeHostLifetime(client);
         PumpUntilCompleted(lifetime.Completion);
         Assert.Equal(1, client.StartCount);
+        Assert.Equal(1, client.StartupCount);
         using var tabs = new TabControl();
         tabs.TabPages.Add(new TabPage("Existing tab"));
         var management = new TabPage("Fiddler Classic CLI");
@@ -27,7 +28,55 @@ public sealed partial class BridgeControlPanelTests
         CompleteRefresh(panel);
         CompleteRefresh(panel);
         Assert.Equal(1, client.StartCount);
+        Assert.Equal(1, client.StartupCount);
         Assert.Contains("Fiddler Classic: 6.x-test", panel.VersionText);
+    });
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void FreshDaemonPreservesManualActionBeforeDiscoveryCompletes(bool manualEnabled) => RunOnSta(() =>
+    {
+        var client = new FakeHostControlClient
+        {
+            PendingStart = new TaskCompletionSource<HostStartResult>(),
+            Service = new HttpServiceStatus
+            {
+                StartupMode = manualEnabled ? HttpStartupModes.Disabled : HttpStartupModes.Enabled,
+                Enabled = !manualEnabled
+            }
+        };
+        using var lifetime = new BridgeHostLifetime(client);
+        // Initialization has applied the configured policy. A user changes the state before
+        // the bridge's startup/discovery request completes on its background worker.
+        client.Service.Enabled = manualEnabled;
+        client.PendingStart.SetResult(HostStartResult.Started);
+        PumpUntilCompleted(lifetime.Completion);
+        Assert.Null(lifetime.Error);
+        Assert.Equal(1, client.StartCount);
+        Assert.Equal(0, client.StartupCount);
+        Assert.Equal(manualEnabled, client.Service.Enabled);
+    });
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ReusedDaemonAppliesFiddlerLoadPolicyOnce(bool startupEnabled) => RunOnSta(() =>
+    {
+        var client = new FakeHostControlClient
+        {
+            Service = new HttpServiceStatus
+            {
+                StartupMode = startupEnabled ? HttpStartupModes.Enabled : HttpStartupModes.Disabled,
+                Enabled = !startupEnabled
+            }
+        };
+        using var lifetime = new BridgeHostLifetime(client);
+        PumpUntilCompleted(lifetime.Completion);
+        Assert.Null(lifetime.Error);
+        Assert.Equal(1, client.StartCount);
+        Assert.Equal(1, client.StartupCount);
+        Assert.Equal(startupEnabled, client.Service.Enabled);
     });
 
     [Fact]
@@ -38,6 +87,7 @@ public sealed partial class BridgeControlPanelTests
         PumpUntilCompleted(lifetime.Completion);
         Assert.Equal("Install the host and retry.", lifetime.Error);
         Assert.Equal(TaskStatus.RanToCompletion, lifetime.Completion.Status);
+        Assert.Equal(0, client.StartupCount);
     });
 
     [Fact]

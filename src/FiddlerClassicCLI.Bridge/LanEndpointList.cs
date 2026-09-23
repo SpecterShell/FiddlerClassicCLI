@@ -10,6 +10,7 @@ internal sealed class LanEndpointList : TableLayoutPanel
 {
     private string[] _endpoints = Array.Empty<string>();
     private bool _showLan;
+    private bool _selectedMode;
 
     internal LanEndpointList()
     {
@@ -26,15 +27,18 @@ internal sealed class LanEndpointList : TableLayoutPanel
     /// <param name="status">A host snapshot. This control never enumerates adapters or probes the network.</param>
     internal void UpdateEndpoints(HttpServiceStatus status)
     {
-        var showLan = status.BindMode == HttpBindModes.All;
+        var showLan = status.BindMode is HttpBindModes.All or HttpBindModes.Selected;
+        var selectedMode = status.BindMode == HttpBindModes.Selected;
         var endpoints = showLan
             ? (status.LanEndpoints ?? Array.Empty<string>()).Take(128)
-                .Where(endpoint => IsLanEndpoint(endpoint, status.Port)).Distinct(StringComparer.Ordinal).Take(8).ToArray()
+                .Where(endpoint => IsLanEndpoint(endpoint, status.Port)).Distinct(StringComparer.Ordinal)
+                .Take(selectedMode ? HttpListenerLimits.MaximumSelectedAddresses : 8).ToArray()
             : Array.Empty<string>();
-        if (_showLan == showLan && _endpoints.SequenceEqual(endpoints, StringComparer.Ordinal))
+        if (_showLan == showLan && _selectedMode == selectedMode && _endpoints.SequenceEqual(endpoints, StringComparer.Ordinal))
             return;
 
         _showLan = showLan;
+        _selectedMode = selectedMode;
         _endpoints = endpoints;
         SuspendLayout();
         try
@@ -49,22 +53,23 @@ internal sealed class LanEndpointList : TableLayoutPanel
                 UseMnemonic = false,
                 AccessibleName = "LAN address availability",
                 Text = endpoints.Length == 0
-                    ? "No LAN IPv4 URLs were reported. Remote reachability has not been tested."
-                    : "Active adapter IPv4 URLs (up to 8). Remote reachability depends on routing and firewall settings. It has not been tested."
+                    ? "No LAN IPv4 URLs were reported."
+                    : (selectedMode ? $"Selected IPv4 URLs (up to {HttpListenerLimits.MaximumSelectedAddresses})." : "Active adapter IPv4 URLs (up to 8).")
             });
             for (var index = 0; index < endpoints.Length; index++)
             {
                 var endpoint = endpoints[index];
-                var label = new Label { AutoSize = true, Text = endpoint, UseMnemonic = false, AccessibleName = $"LAN endpoint {index + 1}" };
+                var address = new SelectableAddress { Text = endpoint, AccessibleName = $"LAN endpoint {index + 1}" };
                 var copy = new ClipboardButton
                 {
                     Text = $"Copy &{index + 1}",
                     AccessibleName = $"Copy LAN endpoint {index + 1}",
                     AccessibleDescription = endpoint,
+                    ToolTipText = "Copy this LAN MCP HTTP URL to the clipboard.",
+                    GetCopyText = () => endpoint,
                     AutoSize = true
                 };
-                copy.Click += (_, _) => Clipboard.SetText(endpoint);
-                AddRow(new EndpointRow(label, copy));
+                AddRow(new EndpointRow(address, copy));
             }
             Visible = showLan;
         }

@@ -1,48 +1,106 @@
-// Draws a font-scaled clipboard glyph while retaining native button focus, text, and keyboard behavior.
+// Copies values with temporary feedback, content-sized width, and native keyboard and tooltip behavior.
 using System.Drawing;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace FiddlerClassicCLI.Bridge;
 
-internal sealed class ClipboardButton : Button
+internal sealed partial class ClipboardButton : PanelButton
 {
-    private readonly ToolTip _hint = new ToolTip();
-    internal string MnemonicText { get; set; } = string.Empty;
-    private static readonly string[] Pixels =
-    {
-        "................", ".....######.....", ".....#....#.....", "...###....###...",
-        "...#.######.#...", "...#........#...", "...#........#...", "...#..####..#...",
-        "...#........#...", "...#..####..#...", "...#........#...", "...#..####..#...",
-        "...#........#...", "...##########...", "................", "................"
-    };
+    private const string CopiedCaption = "Copied!";
+    private readonly ToolTip _hint = new ToolTip { ShowAlways = true };
+    private readonly System.Windows.Forms.Timer _feedbackTimer = new System.Windows.Forms.Timer { Interval = 1500 };
+    private readonly Action<string> _writeClipboard;
+    private string _caption = "&Copy";
+    private bool _compact;
+    private bool _copied;
 
-    internal ClipboardButton()
+    /// <summary>Reads the current value only when activated. Values never enter the tooltip.</summary>
+    internal Func<string?>? GetCopyText { get; set; }
+    internal string MnemonicText => _caption;
+
+    internal string ToolTipText
     {
+        get => _hint.GetToolTip(this);
+        set => _hint.SetToolTip(this, value);
+    }
+
+    public override string Text
+    {
+        get => base.Text;
+        set { _caption = value ?? string.Empty; UpdatePresentation(); }
+    }
+
+    internal bool Compact
+    {
+        get => _compact;
+        set
+        {
+            if (_compact == value) return;
+            _compact = value;
+            UpdatePresentation();
+        }
+    }
+
+    internal ClipboardButton() : this(Clipboard.SetText) { }
+
+    /// <summary>Creates a clipboard action with an injectable writer for isolated STA checks.</summary>
+    /// <param name="writeClipboard">Writes the value or throws when the clipboard is unavailable.</param>
+    internal ClipboardButton(Action<string> writeClipboard)
+    {
+        _writeClipboard = writeClipboard ?? throw new ArgumentNullException(nameof(writeClipboard));
         Text = "&Copy";
-        AutoSize = true;
-        AutoSizeMode = AutoSizeMode.GrowAndShrink;
         TextImageRelation = TextImageRelation.ImageBeforeText;
-        ImageAlign = ContentAlignment.MiddleLeft;
-        UseVisualStyleBackColor = true;
-        _hint.SetToolTip(this, "Copy URL");
+        ToolTipText = "Copy to clipboard.";
+        _feedbackTimer.Tick += (_, _) => RestoreCaption();
         UpdateImage();
     }
 
-    protected override void OnFontChanged(EventArgs e)
+    protected override void OnClick(EventArgs e)
     {
-        base.OnFontChanged(e);
-        UpdateImage();
+        base.OnClick(e);
+        if (IsDisposed || Disposing) return;
+        var text = GetCopyText?.Invoke();
+        if (string.IsNullOrEmpty(text))
+        {
+            RestoreCaption();
+            return;
+        }
+        try
+        {
+            _writeClipboard(text!);
+        }
+        catch (ExternalException)
+        {
+            RestoreCaption();
+            // Keep potentially sensitive values out of error text and clipboard diagnostics.
+            if (IsHandleCreated) _hint.Show("Clipboard is busy. Try again.", this, 2000);
+            return;
+        }
+        _feedbackTimer.Stop();
+        _copied = true;
+        UpdatePresentation();
+        _feedbackTimer.Start();
     }
 
-    protected override void OnSystemColorsChanged(EventArgs e)
+    private void RestoreCaption()
     {
-        base.OnSystemColorsChanged(e);
-        UpdateImage();
+        _feedbackTimer.Stop();
+        _copied = false;
+        UpdatePresentation();
+    }
+
+    private void UpdatePresentation()
+    {
+        base.Text = _copied ? CopiedCaption : _compact ? string.Empty : _caption;
+        ImageAlign = _compact ? ContentAlignment.MiddleCenter : ContentAlignment.MiddleLeft;
+        Image = _compact && _copied ? null : _clipboardImage;
+        Parent?.PerformLayout(this, nameof(Text));
     }
 
     protected override bool ProcessMnemonic(char charCode)
     {
-        if (Text.Length == 0 && CanSelect && IsMnemonic(charCode, MnemonicText))
+        if (CanSelect && IsMnemonic(charCode, MnemonicText))
         {
             PerformClick();
             return true;
@@ -51,39 +109,33 @@ internal sealed class ClipboardButton : Button
     }
 
     public override Size GetPreferredSize(Size proposedSize)
-        => GetPreferredSizeForText(Text);
+        => GetPresentationSize(_compact);
+
+    internal Size GetPresentationSize(bool compact) => MeasureContent(
+        _copied ? CopiedCaption : compact ? string.Empty : _caption,
+        compact && _copied ? 0 : _clipboardImage?.Width ?? 0);
 
     internal Size GetPreferredSizeForText(string text)
-    {
-        var preferred = base.GetPreferredSize(Size.Empty);
-        // Native image buttons need room for a single text line, the image gap, and both borders.
-        var textWidth = TextRenderer.MeasureText(text, Font, Size.Empty, TextFormatFlags.SingleLine).Width;
-        preferred.Width = textWidth + (Image?.Width ?? 0) + Padding.Horizontal + 12;
-        return preferred;
-    }
+        => MeasureContent(text, _clipboardImage?.Width ?? 0);
 
-    /// <summary>Owns a crisp pixel-grid image sized for the inherited font, including a high-DPI host.</summary>
-    private void UpdateImage()
+    private Size MeasureContent(string text, int imageWidth)
     {
-        var size = 16 * Math.Max(1, (int)Math.Round(Font.Height / 16d));
-        var bitmap = new Bitmap(size, size);
-        for (var y = 0; y < size; y++)
-            for (var x = 0; x < size; x++)
-                bitmap.SetPixel(x, y, Pixels[y * 16 / size][x * 16 / size] == '#'
-                    ? SystemColors.ControlText : Color.Transparent);
-        var previous = Image;
-        Image = bitmap;
-        previous?.Dispose();
+        var textWidth = TextRenderer.MeasureText(text, Font, Size.Empty, TextFormatFlags.SingleLine).Width;
+        return new Size(textWidth + imageWidth + Padding.Horizontal + 12,
+            PanelStyle.ButtonHeight(Font) + Padding.Vertical);
     }
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
+            _feedbackTimer.Stop();
+            _feedbackTimer.Dispose();
             _hint.Dispose();
-            var image = Image;
+            GetCopyText = null;
             Image = null;
-            image?.Dispose();
+            _clipboardImage?.Dispose();
+            _clipboardImage = null;
         }
         base.Dispose(disposing);
     }

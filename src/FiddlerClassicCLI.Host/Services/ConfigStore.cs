@@ -6,7 +6,7 @@ using FiddlerClassicCLI.Protocol;
 
 namespace FiddlerClassicCLI.Host.Services;
 
-internal sealed class ConfigStore
+internal sealed partial class ConfigStore
 {
     public const int MaximumNamedClients = 64;
     public const int MaximumClientNameLength = 64;
@@ -58,51 +58,6 @@ internal sealed class ConfigStore
             var configuration = GetOrCreateUnsafe();
             configuration.HttpBearerToken = GenerateToken();
             configuration.HttpDefaultTokenCreatedAtUtc = DateTime.UtcNow.ToString("O");
-            return SaveUnsafe(configuration);
-        }
-    }
-
-    public HostConfiguration ConfigureHttpService(string? bindMode, int? port)
-    {
-        using (ConfigFileLock.Acquire(ConfigPath))
-        {
-            var configuration = GetOrCreateUnsafe();
-            if (configuration.HttpServiceEnabled)
-            {
-                throw new HttpAdministrationException(
-                    ErrorCodes.Conflict,
-                    "Disable the managed MCP HTTP service before changing its bind address or port.");
-            }
-
-            if (bindMode is not null)
-            {
-                ValidateBindMode(bindMode);
-                configuration.HttpBindMode = bindMode;
-            }
-
-            if (port.HasValue)
-            {
-                ValidatePort(port.Value);
-                configuration.HttpPort = port.Value;
-            }
-
-            if (bindMode is null && !port.HasValue)
-            {
-                throw new HttpAdministrationException(
-                    ErrorCodes.InvalidRequest,
-                    "Specify a bind mode, a port, or both.");
-            }
-
-            return SaveUnsafe(configuration);
-        }
-    }
-
-    public HostConfiguration SetHttpServiceEnabled(bool enabled)
-    {
-        using (ConfigFileLock.Acquire(ConfigPath))
-        {
-            var configuration = GetOrCreateUnsafe();
-            configuration.HttpServiceEnabled = enabled;
             return SaveUnsafe(configuration);
         }
     }
@@ -204,17 +159,6 @@ internal sealed class ConfigStore
         return Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
     }
 
-    internal static void ValidateBindMode(string bindMode)
-    {
-        if (!string.Equals(bindMode, HttpBindModes.Loopback, StringComparison.Ordinal)
-            && !string.Equals(bindMode, HttpBindModes.All, StringComparison.Ordinal))
-        {
-            throw new HttpAdministrationException(
-                ErrorCodes.InvalidRequest,
-                "Bind mode must be 'loopback' or 'all'.");
-        }
-    }
-
     internal static void ValidatePort(int port)
     {
         if (port is < 1 or > 65535)
@@ -230,9 +174,18 @@ internal sealed class ConfigStore
             return SaveUnsafe(CreateDefault());
         }
 
-        var existing = JsonSerializer.Deserialize<HostConfiguration>(File.ReadAllText(ConfigPath), JsonOptions)
+        using var document = JsonDocument.Parse(File.ReadAllText(ConfigPath));
+        var existing = document.RootElement.Deserialize<HostConfiguration>(JsonOptions)
             ?? throw new InvalidDataException("The Fiddler Classic CLI configuration is empty.");
         var changed = Normalize(existing);
+        // Preserve an explicit earlier preference without retaining the superseded field in new writes.
+        if (!document.RootElement.TryGetProperty(nameof(HostConfiguration.HttpAuthenticationMode), out _)
+            && document.RootElement.TryGetProperty("HttpRequireAuthentication", out var legacyAuthentication))
+        {
+            existing.HttpAuthenticationMode = legacyAuthentication.GetBoolean()
+                ? HttpAuthenticationModes.Required : HttpAuthenticationModes.None;
+            changed = true;
+        }
         if (changed)
         {
             return SaveUnsafe(existing);
@@ -298,7 +251,7 @@ internal sealed class ConfigStore
         }
 
         ValidatePort(configuration.HttpPort);
-        ValidateBindMode(configuration.HttpBindMode);
+        HttpListenerSettings.Validate(configuration);
         if (configuration.AuthorizedHttpClients.Count > MaximumNamedClients)
         {
             throw new InvalidDataException($"The HTTP client list exceeds {MaximumNamedClients} entries.");
@@ -345,6 +298,9 @@ internal sealed class HostConfiguration
     public string HttpDefaultTokenCreatedAtUtc { get; set; } = string.Empty;
     public bool HttpServiceEnabled { get; set; }
     public string HttpBindMode { get; set; } = HttpBindModes.Loopback;
+    public string[] HttpBindAddresses { get; set; } = Array.Empty<string>();
+    public string HttpStartupMode { get; set; } = HttpStartupModes.LastState;
+    public string HttpAuthenticationMode { get; set; } = HttpAuthenticationModes.NonLoopback;
     public List<AuthorizedHttpClientConfiguration> AuthorizedHttpClients { get; set; } = new();
 }
 

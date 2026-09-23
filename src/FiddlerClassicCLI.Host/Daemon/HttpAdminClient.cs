@@ -21,12 +21,12 @@ internal sealed class HttpAdminClient
         if (daemon is null)
         {
             using var ownership = _daemonClient.AcquireOfflineAccess();
-            return FromConfiguration(_configStore.GetOrCreate());
+            return HttpEndpointResolver.FromConfiguration(_configStore.GetOrCreate());
         }
 
         if (!SupportsManagedHttp(daemon))
         {
-            var status = FromConfiguration(_configStore.GetOrCreate());
+            var status = HttpEndpointResolver.FromConfiguration(_configStore.GetOrCreate());
             status.LastError = "The running CLI daemon must be restarted to manage MCP HTTP.";
             return status;
         }
@@ -35,21 +35,23 @@ internal sealed class HttpAdminClient
             ?? await _daemonClient.GetHttpServiceStatusAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>Updates listener settings through the daemon or under exclusive offline ownership.</summary>
+    /// <param name="request">The settings to change and any explicit security acknowledgment.</param>
+    /// <param name="cancellationToken">Cancels daemon discovery and the configuration exchange.</param>
     public async Task<HttpServiceStatus> ConfigureServiceAsync(
-        string? bindMode,
-        int? port,
+        ConfigureHttpServiceRequest request,
         CancellationToken cancellationToken)
     {
         var daemon = await _daemonClient.TryGetStatusAsync(cancellationToken).ConfigureAwait(false);
         if (daemon is null)
         {
             using var ownership = _daemonClient.AcquireOfflineAccess();
-            return FromConfiguration(_configStore.ConfigureHttpService(bindMode, port));
+            return HttpEndpointResolver.FromConfiguration(_configStore.ConfigureHttpService(request));
         }
 
         EnsureManagedHttp(daemon);
         return await _daemonClient.ConfigureHttpServiceAsync(
-            new ConfigureHttpServiceRequest { BindMode = bindMode, Port = port },
+            request,
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -66,7 +68,7 @@ internal sealed class HttpAdminClient
         if (daemon is null)
         {
             using var ownership = _daemonClient.AcquireOfflineAccess();
-            return FromConfiguration(_configStore.SetHttpServiceEnabled(false));
+            return HttpEndpointResolver.FromConfiguration(_configStore.SetHttpServiceEnabled(false));
         }
 
         EnsureManagedHttp(daemon);
@@ -170,24 +172,8 @@ internal sealed class HttpAdminClient
         {
             throw new DaemonClientException(
                 ErrorCodes.ProtocolMismatch,
-                "The running CLI daemon predates managed MCP HTTP support. Stop and restart the daemon.");
+                "The running CLI daemon does not support the current MCP HTTP settings. Stop and restart the daemon.");
         }
-    }
-
-    private static HttpServiceStatus FromConfiguration(HostConfiguration configuration)
-    {
-        var address = string.Equals(configuration.HttpBindMode, HttpBindModes.All, StringComparison.Ordinal)
-            ? "0.0.0.0"
-            : "127.0.0.1";
-        return HttpEndpointResolver.Populate(new HttpServiceStatus
-        {
-            Enabled = configuration.HttpServiceEnabled,
-            Running = false,
-            BindMode = configuration.HttpBindMode,
-            BindAddress = address,
-            Port = configuration.HttpPort,
-            Endpoint = $"http://{address}:{configuration.HttpPort}/mcp"
-        });
     }
 
     private static ListHttpClientsResponse ClientsFromConfiguration(HostConfiguration configuration)

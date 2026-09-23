@@ -1,4 +1,4 @@
-// Checks inline URL actions, truthful status lights, and native combo text bounds at enlarged font scales.
+// Checks inline URL actions, accessible listener state, and native combo text bounds at enlarged font scales.
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
@@ -12,7 +12,7 @@ public sealed partial class BridgeControlPanelTests
     [Fact]
     public void CompactCopyRetainsItsKeyboardShortcutAndExpandsAgain() => RunOnSta(() =>
     {
-        var label = new Label { Text = "http://127.0.0.1:8877/mcp" };
+        var label = new SelectableAddress { Text = "http://127.0.0.1:8877/mcp" };
         var copy = new ClipboardButton { AccessibleName = "Copy test URL" };
         using var row = new EndpointRow(label, copy) { Size = new Size(100, 150) };
         row.CreateControl();
@@ -51,11 +51,11 @@ public sealed partial class BridgeControlPanelTests
             panel.PerformLayout();
             Application.DoEvents();
             AssertContentFits(panel);
-            var rows = Descendants(panel).OfType<EndpointRow>().ToArray();
+            var rows = Descendants(Named<GroupBox>(panel, "MCP addresses")).OfType<EndpointRow>().ToArray();
             Assert.Equal(3, rows.Length);
             foreach (var row in rows)
             {
-                var label = Assert.Single(row.Controls.OfType<Label>());
+                var label = Assert.Single(row.Controls.OfType<SelectableAddress>());
                 var copy = Assert.Single(row.Controls.OfType<ClipboardButton>());
                 Assert.True(copy.Left >= label.Right, "Each copy button must be to the right of its URL.");
                 Assert.True(label.Width <= label.GetPreferredSize(Size.Empty).Width,
@@ -107,49 +107,42 @@ public sealed partial class BridgeControlPanelTests
     });
 
     [Fact]
-    public void StatusLightReflectsListeningStoppedAndUnknownStatesWithoutReplacingText() => RunOnSta(() =>
+    public void CheckboxRetainsAccessibleListeningStoppedAndUnknownDetailsWithoutAStatusRow() => RunOnSta(() =>
     {
         var client = new FakeHostControlClient();
         using var panel = new BridgeControlPanel(client) { Size = new Size(640, 1000) };
-        var indicator = Named<ServiceStatusIndicator>(panel, "MCP HTTP listener indicator");
-        Assert.Null(indicator.Running);
-        Assert.False(indicator.TabStop);
+        var checkbox = Named<CheckBox>(panel, "Enable MCP HTTP service");
         CompleteRefresh(panel);
-        Assert.False(indicator.Running);
-        Assert.Equal(Color.FromArgb(222, 79, 99), indicator.ForeColor);
+        Assert.False(checkbox.Checked);
         Assert.Equal("Disabled", panel.ServiceStateText);
         client.Service.Enabled = true;
         CompleteRefresh(panel);
-        Assert.False(indicator.Running);
+        Assert.True(checkbox.Checked);
         Assert.Equal("Enabled, stopped", panel.ServiceStateText);
         client.Service.Running = true;
         CompleteRefresh(panel);
-        Assert.True(indicator.Running);
-        Assert.Equal(Color.FromArgb(35, 153, 111), indicator.ForeColor);
-        Assert.Equal("Listening", indicator.AccessibleDescription);
+        Assert.True(checkbox.Checked);
         Assert.StartsWith("Listening on", panel.ServiceStateText);
-        var text = Named<Label>(panel, "Service status");
-        Assert.Same(indicator.Parent, text.Parent);
-        Assert.True(indicator.Right <= text.Left);
+        Assert.Equal(panel.ServiceStateText, checkbox.AccessibleDescription);
         client.ServiceFailure = new TimeoutException("test status timeout");
         CompleteRefresh(panel);
-        Assert.Null(indicator.Running);
-        Assert.Equal(SystemColors.GrayText, indicator.ForeColor);
         Assert.Equal("Status unavailable", panel.ServiceStateText);
         client.ServiceFailure = null;
         CompleteRefresh(panel);
-        Assert.True(indicator.Running);
+        Assert.StartsWith("Listening on", checkbox.AccessibleDescription);
     });
 
     private static void SaveServiceSnapshot(Control panel, string suffix)
+        => SaveLayoutSnapshot(Named<TabPage>(panel, "MCP"), $"service-{suffix}");
+
+    private static void SaveLayoutSnapshot(Control control, string name)
     {
         var directory = Environment.GetEnvironmentVariable("FIDDLER_CLASSIC_LAYOUT_SNAPSHOTS");
         if (string.IsNullOrEmpty(directory)) return;
         Directory.CreateDirectory(directory);
-        var group = Named<GroupBox>(panel, "MCP HTTP service");
-        using var bitmap = new Bitmap(group.Width, group.Height);
-        group.DrawToBitmap(bitmap, group.ClientRectangle);
-        bitmap.Save(Path.Combine(directory, $"service-{suffix}.png"));
+        using var bitmap = new Bitmap(control.Width, control.Height);
+        control.DrawToBitmap(bitmap, control.ClientRectangle);
+        bitmap.Save(Path.Combine(directory, $"{name}.png"));
     }
 
     [StructLayout(LayoutKind.Sequential)]

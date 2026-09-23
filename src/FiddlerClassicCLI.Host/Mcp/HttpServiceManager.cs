@@ -9,36 +9,51 @@ internal sealed class HttpServiceManager : IAsyncDisposable
 {
     private readonly ConfigStore _configStore;
     private readonly HttpCredentialManager _credentials;
+    private readonly Func<HttpInterfaceAddressDto[]> _readInterfaces;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private HttpConnectionRegistry _connections = new();
-    private ManagedHttpServer? _server;
+    private ActiveListener? _listener;
     private string? _lastError;
 
-    public HttpServiceManager(ConfigStore configStore)
+    // Keep the applied transport settings with its owner. File edits must never make an
+    // anonymous running listener appear authenticated before it has actually restarted.
+    private sealed record ActiveListener(ManagedHttpServer Server, string BindMode,
+        string[] BindAddresses, int Port, string AuthenticationMode);
+
+    public HttpServiceManager(ConfigStore configStore, Func<HttpInterfaceAddressDto[]>? readInterfaces = null)
     {
         _configStore = configStore;
         _credentials = new HttpCredentialManager(configStore);
+        _readInterfaces = readInterfaces ?? (() => HttpEndpointResolver.ReadInterfaceAddresses());
     }
 
     public async Task InitializeAsync(CancellationToken cancellationToken)
     {
-        var configuration = _configStore.GetOrCreate();
-        if (!configuration.HttpServiceEnabled)
-        {
-            return;
-        }
+        await ApplyStartupAsync(cancellationToken).ConfigureAwait(false);
+    }
 
+    /// <summary>Applies startup policy once per daemon startup or explicit extension initialization.</summary>
+    /// <param name="cancellationToken">Cancels listener changes and preserves caller cancellation.</param>
+    /// <returns>Listener state, including a bind error if the configured endpoints are unavailable.</returns>
+    public async Task<HttpServiceStatus> ApplyStartupAsync(CancellationToken cancellationToken)
+    {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            var configuration = _configStore.ApplyHttpStartup();
             try
             {
-                await StartUnsafeAsync(configuration, cancellationToken).ConfigureAwait(false);
+                if (configuration.HttpServiceEnabled)
+                    await StartUnsafeAsync(configuration, cancellationToken).ConfigureAwait(false);
+                else
+                    await StopUnsafeAsync().ConfigureAwait(false);
+                _lastError = null;
             }
-            catch (Exception exception)
+            catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
                 _lastError = exception.Message;
             }
+            return CreateStatus(configuration);
         }
         finally
         {
@@ -59,8 +74,13 @@ internal sealed class HttpServiceManager : IAsyncDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var configuration = _configStore.ConfigureHttpService(request.BindMode, request.Port);
-            _lastError = null;
+            if (_listener is not null && (request.BindMode is not null || request.BindAddresses is not null
+                || request.Port.HasValue || request.AuthenticationMode is not null))
+                throw new HttpAdministrationException(ErrorCodes.Conflict,
+                    "Disable the managed MCP HTTP service before changing its bindings, port, or authentication.");
+            var configuration = _configStore.ConfigureHttpService(request);
+            // A startup-only edit does not retry a failed listener or resolve its bind error.
+            if (!configuration.HttpServiceEnabled) _lastError = null;
             return CreateStatus(configuration);
         }
         finally
@@ -74,23 +94,14 @@ internal sealed class HttpServiceManager : IAsyncDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var configuration = _configStore.GetOrCreate();
-            if (string.Equals(configuration.HttpBindMode, HttpBindModes.All, StringComparison.Ordinal)
-                && !confirmRemote)
-            {
-                throw new HttpAdministrationException(
-                    ErrorCodes.ConfirmationRequired,
-                    "Binding MCP HTTP to 0.0.0.0 requires explicit confirmation because bearer tokens use plaintext HTTP.");
-            }
-
-            configuration = _configStore.SetHttpServiceEnabled(true);
-            if (_server is null)
+            var configuration = _configStore.SetHttpServiceEnabled(true, confirmRemote);
+            if (_listener is null)
             {
                 try
                 {
                     await StartUnsafeAsync(configuration, cancellationToken).ConfigureAwait(false);
                 }
-                catch (Exception exception)
+                catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
                 {
                     _lastError = exception.Message;
                     throw new HttpAdministrationException(
@@ -227,55 +238,64 @@ internal sealed class HttpServiceManager : IAsyncDisposable
 
     private async Task StartUnsafeAsync(HostConfiguration configuration, CancellationToken cancellationToken)
     {
-        if (_server is not null)
+        if (_listener is not null)
         {
             return;
         }
 
-        ConfigStore.ValidateBindMode(configuration.HttpBindMode);
+        HttpListenerSettings.Validate(configuration);
         ConfigStore.ValidatePort(configuration.HttpPort);
         _connections = new HttpConnectionRegistry();
-        var address = string.Equals(configuration.HttpBindMode, HttpBindModes.All, StringComparison.Ordinal)
-            ? IPAddress.Any
-            : IPAddress.Loopback;
-        _server = await McpHost.StartHttpAsync(
-            address,
+        var addresses = HttpListenerSettings.GetAddresses(configuration);
+        if (configuration.HttpBindMode == HttpBindModes.Selected)
+        {
+            var available = new HashSet<string>(_readInterfaces().Select(item => item.Address), StringComparer.Ordinal);
+            var missing = configuration.HttpBindAddresses.Where(address => !available.Contains(address)).ToArray();
+            if (missing.Length != 0)
+                throw new HttpAdministrationException(ErrorCodes.Unavailable,
+                    $"Selected IPv4 addresses are unavailable: {string.Join(", ", missing)}. Disable MCP HTTP and choose active local addresses.");
+        }
+        var server = await McpHost.StartHttpAsync(
+            addresses,
             configuration.HttpPort,
             _credentials,
             _connections,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            authenticationMode: configuration.HttpAuthenticationMode).ConfigureAwait(false);
+        Volatile.Write(ref _listener, new ActiveListener(server, configuration.HttpBindMode,
+            configuration.HttpBindAddresses.ToArray(), configuration.HttpPort, configuration.HttpAuthenticationMode));
         _lastError = null;
     }
 
     private async Task StopUnsafeAsync()
     {
-        if (_server is null)
+        var listener = _listener;
+        if (listener is null)
         {
             return;
         }
 
-        var server = _server;
-        _server = null;
-        await server.DisposeAsync().ConfigureAwait(false);
+        await listener.Server.DisposeAsync().ConfigureAwait(false);
+        Volatile.Write(ref _listener, null);
         _connections = new HttpConnectionRegistry();
     }
 
     private HttpServiceStatus CreateStatus(HostConfiguration configuration)
     {
-        var bindAddress = string.Equals(configuration.HttpBindMode, HttpBindModes.All, StringComparison.Ordinal)
-            ? "0.0.0.0"
-            : "127.0.0.1";
-        return HttpEndpointResolver.Populate(new HttpServiceStatus
+        var listener = Volatile.Read(ref _listener);
+        if (listener is not null)
         {
-            Enabled = configuration.HttpServiceEnabled,
-            Running = _server is not null,
-            BindMode = configuration.HttpBindMode,
-            BindAddress = bindAddress,
-            Port = configuration.HttpPort,
-            Endpoint = $"http://{bindAddress}:{configuration.HttpPort}/mcp",
-            ActiveConnectionCount = _connections.Count,
-            LastError = _lastError
-        });
+            configuration = new HostConfiguration
+            {
+                HttpServiceEnabled = configuration.HttpServiceEnabled,
+                HttpStartupMode = configuration.HttpStartupMode,
+                HttpBindMode = listener.BindMode,
+                HttpBindAddresses = listener.BindAddresses,
+                HttpPort = listener.Port,
+                HttpAuthenticationMode = listener.AuthenticationMode
+            };
+        }
+        return HttpEndpointResolver.FromConfiguration(configuration, listener is not null, _connections.Count, _lastError);
     }
 
     private AuthorizedHttpClientDto CreateClient(

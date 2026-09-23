@@ -127,7 +127,7 @@ fiddler-classic-cli sessions list --host example.test --limit 200 --summary --js
 fiddler-classic-cli doctor --output C:\Temp\fiddler-diagnostics.json --json
 ```
 
-指定 `--output` 后，`doctor` 会创建新的 JSON 文件，包含数字形式的组件版本、预期协议版本、已知能力、监听状态，以及预定义的错误和处理建议。报告不包含流量、标头、正文、凭据、客户端身份、局域网地址、本地路径、原始错误文本或任意版本后缀。导出不会启动守护进程或创建配置。守护进程停止时，报告无法确定已保存的监听设置。
+指定 `--output` 后，`doctor` 会创建新的 JSON 文件，包含数字形式的组件版本、预期协议版本、已知能力、监听状态，以及预定义的错误和处理建议。监听器元数据包含白名单内的 `bindMode`、`startupMode` 和 `authenticationMode` 字符串。报告不包含选定 IP、端点 URL、适配器名称、流量、标头、正文、凭据、客户端身份、本地路径、原始错误文本或任意版本后缀。导出不会启动守护进程或创建配置。守护进程停止时，报告无法确定已保存的监听设置。
 
 请指定现有可写目录中普通文件的绝对路径。命令拒绝已有文件、标准输出 (`-`)、设备路径和备用数据流，并以原子方式发布完整报告。即使报告记录了组件不可用，导出成功仍返回退出码 0。`--json` 输出包含路径和格式的回执。无效路径返回 2，无法创建文件返回 5。不指定 `--output` 时，命令使用原有健康检查和退出码。分享前请检查报告内容。
 
@@ -222,26 +222,70 @@ HTTP 请求每次都须发送 `MCP-Protocol-Version` 和 `Mcp-Method`，`tools/c
 | 400，JSON-RPC `-32020` | 现代协议要求的标头缺失或与正文不一致。 |
 | 400，JSON-RPC `-32022` | 不支持所请求的版本。`error.data` 包含 `requested` 和 `supported`。 |
 | 404，JSON-RPC `-32601` | RPC 方法未知。 |
-| 401 | Bearer 凭据缺失或无效。 |
-| 403 | 请求包含 `Origin` 标头。即使 Bearer 凭据有效，也不允许浏览器来源访问。 |
+| 401 | 服务要求身份验证，但 Bearer 凭据缺失或无效。 |
+| 403 | 请求包含 `Origin` 标头，或匿名托管请求未通过 Host 校验。 |
 | 405 | HTTP 方法没有对应的端点路由，包括 GET 和 DELETE。 |
 
 这些传输层响应与 CLI 退出码相互独立。旧版客户端继续使用 `initialize` 和协商版本对应的请求格式。协议细节见 [MCP 规范](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)和 [C# SDK 版本说明](https://csharp.sdk.modelcontextprotocol.io/v2/versioning.html)。
 
 ## 托管 MCP HTTP
 
-前台 `mcp http` 服务器只绑定回环地址。如果端口已被其他监听器占用，会返回明确的绑定错误并退出。守护进程管理的监听器可持久运行，且默认禁用。查询已保存的状态不会启动已经停止的守护进程：
+前台 `mcp http` 服务器只绑定回环地址，始终要求 Bearer 身份验证。如果端口已被其他监听器占用，会返回明确的绑定错误并退出。托管设置不影响前台服务器的身份验证或绑定。守护进程管理的监听器可持久运行，默认禁用、仅绑定回环地址，身份验证模式为 `non-loopback`。查询已保存的状态不会启动已经停止的守护进程：
 
 ```powershell
 fiddler-classic-cli mcp service status
-fiddler-classic-cli mcp service configure --bind loopback --port 8877
+fiddler-classic-cli mcp service configure --bind loopback --port 8877 --authentication non-loopback
 fiddler-classic-cli mcp service enable
 fiddler-classic-cli mcp service disable
 ```
 
-绑定模式 `loopback` 使用 `127.0.0.1`，`all` 使用 IPv4 `0.0.0.0`。更改绑定模式或端口前必须禁用服务。启用 `all` 时需要在交互式警告中确认或提供 `--yes`，因为 Bearer 凭据通过明文 HTTP 传输，一旦被截获即可重复使用。即使守护进程已停止，禁用操作仍会更新已保存的状态。有活动连接时禁用服务需要确认。
+`mcp service configure` 接受以下选项，省略的选项保留原有设置：
+
+| 选项 | 值与行为 |
+| --- | --- |
+| `--bind` | `loopback` 绑定 `127.0.0.1`，`all` 绑定 IPv4 `0.0.0.0`，`selected` 绑定通过 `--address` 显式指定的地址。 |
+| `--address` | 可重复指定选定的活动本地 IPv4 地址，最多 16 个互不重复的点分十进制单播地址。要求同时指定 `--bind selected`，或已保存的模式为 `selected`。配置保存具体的 IP 地址。 |
+| `--port` | 所有配置地址共用的端口，范围为 1 至 65535。 |
+| `--startup` | `enabled`、`disabled` 或默认值 `last-state`，控制启动时的服务状态。 |
+| `--authentication` | `required` 检查每个请求，`non-loopback`（默认值）仅豁免套接字远端和本地 IP 都是回环地址的连接，`none` 跳过 Bearer 检查。仅适用于托管监听器。 |
+| `--yes` | 确认安全警告，跳过交互提示。stdin 被重定向时，此类更改必须提供该选项。 |
+
+新建或未设置的配置使用 `non-loopback`。配置文件中已有的显式旧字段 `HttpRequireAuthentication` 在加载时将 `true` 转为 `required`，将 `false` 转为 `none`。配置文件保存字符串 `HttpAuthenticationMode`；传输协议和 CLI 服务 JSON 使用 `authenticationMode`。
+
+`non-loopback` 豁免依据实际套接字的两个 IP，判断前会将 IPv4 映射地址转换为 IPv4。即使请求来自本机，访问局域网地址仍须提供 Bearer 凭据。任一地址未知时都要求身份验证，`Host`、`Forwarded` 和 `X-Forwarded-For` 不能获得豁免。豁免请求为匿名请求，拥有完整 MCP 权限，即使携带 Bearer 令牌也不会归属到任何凭据。
+
+更改绑定模式、选定地址、端口或身份验证前，必须禁用服务。仅修改启动策略时，可保持服务运行。例如，先用 `mcp service status --json` 查看 `availableInterfaces`，再选择本机实际存在的地址：
+
+```powershell
+fiddler-classic-cli mcp service configure --bind selected --address 127.0.0.1 --address 192.168.1.10 --port 8877
+fiddler-classic-cli mcp service enable --yes
+```
+
+请将示例中的局域网地址替换为活动的本地 IPv4 地址。指定 `--bind selected` 时，必须提供至少一个 `--address`。已保存选定模式时，`--address` 会替换原地址列表。切换到 `loopback` 或 `all` 会清除该列表。服务会逐一绑定选定地址。如果启动时某个地址不可用，会报告绑定错误，守护进程仍可供管理操作使用。服务不会替换为其他地址，也不会回退为监听所有接口。DHCP 或适配器发生变化后，应检查所选地址。
+
+启用远程访问需要在交互式警告中确认或提供 `--yes`。使用 `required` 或 `non-loopback` 时，警告会说明 Bearer 凭据通过明文 HTTP 传输，被截获后可重复使用。使用 `none` 时，警告会说明所有可达客户端都将获得完整 MCP 权限。仅绑定回环地址时，保存或启用 `non-loopback` 无需访问风险确认。保存或启用 `none` 即使仅绑定回环地址也需要确认。即使守护进程已停止，禁用操作仍会更新已保存的状态。有活动连接时禁用服务需要确认。
+
+启动策略在守护进程启动时，以及 Fiddler 加载扩展时生效，也适用于当时已在运行的守护进程。`enabled` 启动监听器，`disabled` 停止监听器，`last-state` 保留已保存的预期启用状态。新安装保持禁用。更改策略会保存设置，供下一次启动使用，当前服务状态不变。需要立即更改时，请使用 `service enable` 或 `service disable`。只要配置更新后的策略为 `enabled`，且允许远程访问或使用 `none` 模式，该次更新就需要确认：
+
+```powershell
+fiddler-classic-cli mcp service configure --startup enabled --yes
+fiddler-classic-cli mcp service configure --startup disabled
+fiddler-classic-cli mcp service configure --startup last-state
+```
+
+要通过 `none` 跳过所有托管 Bearer 检查，请先禁用服务，再明确确认风险：
+
+```powershell
+fiddler-classic-cli mcp service disable --yes
+fiddler-classic-cli mcp service configure --authentication none --yes
+fiddler-classic-cli mcp service enable --yes
+```
+
+所有能连接到 `none` 模式监听器的客户端都可以读取抓包流量并调用全部 MCP 工具，包括修改操作。本机进程（包括其他 Windows 账户下的进程）也可通过默认 `non-loopback` 的回环豁免获得相同权限。命名管道仍仅允许当前 Windows 用户访问。通过回环连接的本地中继或反向代理会被视为回环对端。如需回环调用方或中继也验证身份，请选择 `required`。各工具仍按文档要求接收确认参数，但任何已连接客户端都可提供这些参数。如需每个请求都提供凭据，请先禁用服务，配置 `--authentication required`，再重新启用。使用 `--authentication non-loopback` 可恢复默认豁免。所有模式都会保留命名凭据和默认凭据，但凭据不会限制匿名访问，也不会用于标识匿名请求。所有模式都拒绝携带 Origin 的请求。匿名请求（包括回环豁免请求）还必须使用与接收套接字实际 IP 地址和端口匹配的 Host 标头，回环连接也可使用 `localhost` 加相应端口。匿名请求不得使用自定义 DNS 名称。本项目不会启用 CORS，也不配置 TLS 或防火墙规则。
 
 只有连接尝试未得到应答且能够独占守护进程所有权管道时，才允许离线管理。已连接或繁忙的守护进程超时会报告错误（`timeout`，退出码 6）。在这种情况下，管理操作不会将已保存的状态当作实时状态读取，也不会离线写入配置或启动另一个守护进程。进一步操作前请重试状态查询。响应格式错误或对端连接中断也会报告错误。
+
+无效模式、端口或地址列表返回退出码 2。缺少确认或在服务启用时尝试更改监听设置返回 5。启用时绑定失败返回 4，此时可能出现 `enabled: true`、`running: false`。请检查 `lastError`，禁用服务后再修改设置。启动时绑定失败也会保留守护进程，供状态查询和配置使用。指定 `--json` 时，失败通过 stderr 输出结构化错误，成功则返回服务状态对象。
 
 默认 CLI 令牌通过 `config token show|rotate` 管理。命名客户端使用独立的 256 位令牌：
 
@@ -253,7 +297,7 @@ fiddler-classic-cli mcp clients deauthorize <client-id> --yes
 
 命令只显示一次授权令牌，配置中仅保存其 SHA-256 哈希。名称长度为 1 至 64 个字符，按不区分大小写的规则检查唯一性，命名客户端上限为 64 个。取消 `default` 客户端的授权会轮换默认 CLI 令牌。取消授权需要确认，并会中止使用该凭据的活动连接。已经分派的操作可能已经完成。
 
-前台和托管监听器使用同一份配置中的凭据。轮换和撤销会在后续请求中生效，无需重启监听器。连接检查和强制断开仅适用于守护进程管理的监听器。撤销凭据不会中止已经分派的前台操作。
+前台请求和需要身份验证的托管请求使用同一份配置中的凭据。轮换和撤销会在后续请求中生效，无需重启监听器。连接检查和强制断开仅适用于守护进程管理的监听器。撤销凭据不会中止已经分派的前台操作。撤销凭据无法阻止通过 `none` 或 `non-loopback` 回环豁免获得的匿名访问。
 
 连接检查仅返回运行元数据：
 
@@ -262,19 +306,31 @@ fiddler-classic-cli mcp connections list
 fiddler-classic-cli mcp connections disconnect <connection-id> --yes
 ```
 
-记录包含连接 ID、远程端点、授权和客户端状态、连接及活动时间，以及活动和累计请求数。记录不会包含 URL、标头、令牌或抓包流量。断开连接需要确认，并会中止选定的传输连接。
+记录包含连接 ID、远程端点、授权和客户端状态、连接及活动时间，以及活动和累计请求数。记录不会包含 URL、标头、令牌或抓包流量。`none` 模式的请求和 `non-loopback` 中豁免的回环请求均记录为 `anonymous`，不会归属到令牌客户端。断开连接需要确认，并会中止选定的传输连接。
 
-**Fiddler Classic CLI** 标签页提供相同的控制功能，并显示客户端、连接、错误和组件版本信息。Tools 菜单中的入口可切换到该标签页。这些控件管理 MCP HTTP，不会改变 Fiddler 的抓包代理。扩展在加载时启动或发现守护进程，即使用户从未打开标签页也会执行。每次刷新都会重新读取所配置主程序和运行中守护进程的版本，包括守护进程重启后的版本。卸载会取消扩展的后台工作，守护进程继续运行。
+**Fiddler Classic CLI** 标签页包含原生 **MCP**、**Named pipes** 和 **Settings** 子标签页，Tools 菜单入口可切换到该面板。MCP 顶部为 **Enable MCP HTTP** 复选框，其后依次为 Bind、Port 和 Apply/Refresh。按钮下方的 **MCP addresses** 分组框集中显示回环和局域网 URL，**Authorized clients** 和 **Active connections** 各有独立的分组框。选择 **selected** 绑定模式后，可通过带有适配器名称的本地 IPv4 地址列表勾选多个地址。这些控件管理 MCP HTTP，与 Fiddler 抓包代理相互独立。
 
-服务禁用时，刷新会保留尚未应用的绑定地址和端口修改。启用服务前，请先点击 **Apply**。如果另一个客户端启用了服务，字段会显示当前生效的设置，并变为只读。刷新也会保留表格选中项和滚动位置。如果选中的客户端或连接已不存在，标签页会清除选择并禁用对应的操作按钮。
+Settings 包含启动策略和身份验证下拉框，各选项下方都有独立说明。身份验证选项为 **Require for all**（`required`，每个请求均须凭据）、**Non-loopback only**（默认值 `non-loopback`，仅回环连接豁免）和 **No authentication**（`none`，不检查 Bearer 凭据）。点击 **Save settings** 应用更改。其中的 **Versions** 分组框显示 Fiddler、桥接、协议、所配置主程序和运行中守护进程的版本，**Documentation** 分组框提供项目与文档链接。每次刷新都会重新读取所配置主程序和运行中守护进程的版本，包括守护进程重启后的版本。Named pipes 直接在子标签页中显示只读[管道诊断](installation.md#命名管道)，不使用外围分组框。
 
-标签页使用带白色 `>_` 提示符的自定义终端图标，按 Fiddler 的标签页图标尺寸绘制，无需外部图片文件。服务标签和值按列对齐，Bind 和 Port 各占一行。面板变窄时，按钮以及较长的状态和版本文本会自动换行。各区域超出可用高度时，可向下滚动查看。扩展不会更改 Fiddler 的 DPI 兼容性设置。
+扩展在加载时启动或发现守护进程，并应用启动策略，即使用户从未打开标签页也会执行。卸载会取消扩展的后台工作，守护进程继续运行。
+
+MCP HTTP 启用时，Bind 和 Port 仍可编辑。刷新会保留待应用的修改，URL 继续显示实际应用的设置。绑定有变化时，点击 **Apply** 会停止已启用的监听器、保存设置，再重新启动。停止前，面板会要求确认远程访问或 `none` 模式的风险，以及断开活动客户端连接的影响。取消确认会保留监听器原状。任一步骤失败都会停止后续操作，保留编辑内容并显示错误，重试前请检查复选框和错误信息。绑定未变时点击 Apply 不会重启监听器。CLI 配置仍要求先显式禁用服务，身份验证修改也需要先禁用服务，启动策略则可随时编辑。刷新会保留表格选中项和滚动位置。如果选中的客户端或连接已不存在，标签页会清除选择并禁用对应的操作按钮。
+
+后台刷新只更新有变化的单元格，并根据客户端和连接的变化增删行。未排序时，已有行保持原有位置。读取期间仍可点击操作按钮。点击时会记住操作对象和输入，等待当前读取完成后执行，并在操作结束前暂时禁用其他操作按钮。刷新按钮在读取期间保持禁用。
+
+标签页使用带白色 `>_` 提示符的自定义终端图标，按 Fiddler 的标签页图标尺寸绘制，无需外部图片文件。服务标签和值按列对齐，Bind 和 Port 各占一行。接口选择列表设置 `UseCompatibleTextRendering=false`，使文字渲染与周围原生控件一致。操作按钮共用按字体计算的高度和间距，授权对话框也采用相同规则。表格行高随字体调整，背景、文字和选中项使用 Windows 系统颜色。面板变窄时，按钮以及较长的状态和版本文本会自动换行。各区域超出可用高度时，可向下滚动查看。扩展不会更改 Fiddler 的 DPI 兼容性设置。
 
 标签页控制请求和守护进程启动各有十秒的时限。超时后，请先检查服务状态再决定是否重试，因为操作可能已经完成。配置事务会等待其他 CLI 或守护进程完成更新，最多等待五秒。超时仍未取得配置锁时会报告 `timeout`（CLI 退出码 6）。
 
-标签页始终提供回环 URL 和 **Copy loopback** 按钮。在 `all` 模式下，它还会显示最多八个不同的 IPv4 URL，来自活动的非回环适配器，每个地址都有独立的 **Copy LAN** 按钮。这些地址提示未经可达性测试。路由和 Windows 防火墙仍由用户管理。服务 JSON 中的 `endpoint` 表示绑定元数据，`loopbackEndpoint` 和 `lanEndpoints` 提供客户端 URL。连接客户端时应使用后两者。服务禁用时仍可能显示地址提示。
+每个显示的 URL 旁都有复制按钮。`loopback` 和 `all` 模式提供回环地址，`selected` 模式仅在选中回环时提供。在 `all` 模式下，面板还显示最多八个不同的 IPv4 URL 提示，来自活动的非回环适配器。`selected` 模式下的局域网 URL 仅对应选定地址。这些提示未经可达性测试，路由和 Windows 防火墙仍由用户管理。服务禁用时仍可能显示地址提示。
+
+服务 JSON 通过 `bindAddresses` 和 `endpoints` 数组报告监听器绑定，单值字段 `bindAddress` 和 `endpoint` 表示第一个绑定。`availableInterfaces` 最多列出 64 项可选接口，每项包含 `address` 和 `adapterName`。运行期间，绑定、端口和 `authenticationMode` 描述监听器实际应用的设置，未运行时则描述已保存的设置。`startupMode` 和预期的 `enabled` 状态始终反映已保存的偏好。选定绑定不含回环时，`loopbackEndpoint` 为空，`lanEndpoints` 包含适用的局域网 URL。`all` 模式中的 `0.0.0.0` 是绑定元数据，连接时应使用客户端 URL 字段中的具体地址。
+
+请通过面板或 `mcp service configure` 更改监听设置。直接编辑配置文件不会重新配置运行中的监听器。应先禁用服务，应用所需更改后再启用。
 
 控件具有无障碍名称、明确的 Tab 顺序和键盘助记键。使用 Tab/Shift+Tab 在控件之间移动，Alt+B 选择绑定模式，Alt+P 选择端口，按钮中带下划线的字母用于执行相应操作。布局测试覆盖窄面板和放大字体，不会修改 Fiddler 的 DPI 设置。
+
+URL 和命名管道地址使用只读文本框。可拖动鼠标选中部分地址，或按 Tab 聚焦后按 Ctrl+A 全选，再按 Ctrl+C 复制。调整面板大小时会保留选区，刷新后内容未变时也会保留。旁边的复制按钮始终复制完整地址。
 
 ## 输出
 
@@ -296,7 +352,9 @@ fiddler-classic-cli sessions list --host example.test --limit 20 --json
 
 首次安装桥接后，如果标签页没有出现或桥接命令无法连接，请检查 Fiddler 是否弹出了 "Caution: Unverified Extension Detected" 窗口。桥接 DLL 和协议 DLL 可能分别触发提示。请逐一检查文件并手动处理提示，再重试连接。详见[扩展授权说明](installation.md#fiddler-桥接)。
 
-客户端无法协商 MCP 时，请检查其配置的可执行文件和运行中的守护进程是否使用预期的已安装构建。升级后须重启相应的服务器进程。使用 `2026-07-28` 时，应先查看 400 响应中的 JSON-RPC 错误再重试。缺失标头的错误应按该版本的请求要求处理。HTTP 403 表示请求携带了 `Origin` 标头，原生客户端应省略该标头，不应通过启用 CORS 绕过限制。
+客户端无法协商 MCP 时，请检查其配置的可执行文件和运行中的守护进程是否使用预期的已安装构建。升级后须重启相应的服务器进程。使用 `2026-07-28` 时，应先查看 400 响应中的 JSON-RPC 错误再重试。缺失标头的错误应按该版本的请求要求处理。遇到 HTTP 403 时，原生客户端应省略 `Origin`，并使用界面显示的监听器 URL 和匹配的 Host 标头。`none` 和 `non-loopback` 豁免均不会绕过 Origin 或匿名 Host 检查，也不应通过启用 CORS 绕过限制。
+
+网络变化后选定绑定失败时，请对照已保存的 `bindAddresses` 与 `availableInterfaces`。禁用服务，选择预期的活动本地地址并应用，再重新启用。监听器不会静默扩大访问范围。如果服务状态在 Fiddler 或守护进程启动时改变，请检查 **Settings** 或 `startupMode`。使用 `last-state` 可保留上次的预期状态。
 
 命令无法连接时，检查守护进程、服务和桥接状态：
 
@@ -313,4 +371,4 @@ fiddler-classic-cli daemon stop
 fiddler-classic-cli daemon start
 ```
 
-如果 Fiddler 标签页报告缺少托管 HTTP 能力，请重启旧版守护进程。只有 `doctor` 报告扩展桥接未连接时才重启 Fiddler Classic。即使 Fiddler 已关闭，守护进程和托管监听器也可以继续运行。桥接操作会返回不可用或超时错误，并附有处理建议。
+如果 Fiddler 标签页报告缺少 `managed-http-v3` 能力，请重启旧版守护进程。守护进程封装协议仍为版本 1，桥接协议仍为版本 3。只有 `doctor` 报告扩展桥接未连接时才重启 Fiddler Classic。即使 Fiddler 已关闭，守护进程和托管监听器也可以继续运行。桥接操作会返回不可用或超时错误，并附有处理建议。

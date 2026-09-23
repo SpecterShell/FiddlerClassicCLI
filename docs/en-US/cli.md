@@ -127,7 +127,7 @@ Timing statistics use finite, nonnegative durations from completed sessions in t
 fiddler-classic-cli doctor --output C:\Temp\fiddler-diagnostics.json --json
 ```
 
-With `--output`, `doctor` creates a new JSON file containing numeric component versions, expected protocol versions, known capabilities, listener state, and predefined errors with guidance on resolving them. It excludes traffic, headers, bodies, credentials, client identities, LAN addresses, local paths, raw error text, and arbitrary version suffixes. It never starts a daemon or creates configuration. When the daemon is stopped, saved listener settings remain unknown.
+With `--output`, `doctor` creates a new JSON file containing numeric component versions, expected protocol versions, known capabilities, listener state, and predefined errors with guidance on resolving them. Listener metadata includes allowlisted `bindMode`, `startupMode`, and `authenticationMode` strings. It excludes selected IPs, endpoint URLs, adapter names, traffic, headers, bodies, credentials, client identities, local paths, raw error text, and arbitrary version suffixes. It never starts a daemon or creates configuration. When the daemon is stopped, saved listener settings remain unknown.
 
 Specify an absolute path to a regular file in an existing writable directory. The command rejects existing files, stdout (`-`), devices, and alternate data streams. It publishes the complete report atomically. Successful export returns exit code 0 even when the report records an unavailable component. `--json` prints a receipt with the path and format. Invalid paths return 2. Failure to create a file returns 5. Without `--output`, the command uses its existing health checks and exit codes. Review diagnostic files before sharing them.
 
@@ -222,26 +222,70 @@ Ordinary modern results carry `resultType: "complete"`. Discovery and tool listi
 | 400, JSON-RPC `-32020` | A required modern header is missing or differs from the body. |
 | 400, JSON-RPC `-32022` | The requested revision is unsupported. `error.data` gives `requested` and `supported`. |
 | 404, JSON-RPC `-32601` | The RPC method is unknown. |
-| 401 | A bearer credential is missing or invalid. |
-| 403 | The request contains an `Origin` header. Browser origins are not authorized, even with a valid bearer credential. |
+| 401 | Authentication is required and a bearer credential is missing or invalid. |
+| 403 | The request contains an `Origin` header, or an anonymous managed request fails Host validation. |
 | 405 | The HTTP method has no endpoint route, including GET and DELETE. |
 
 These transport responses are separate from CLI exit codes. Older clients continue to use `initialize` and their negotiated revision's request format. For wire details, see the [MCP specification](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http) and [C# SDK versioning guide](https://csharp.sdk.modelcontextprotocol.io/v2/versioning.html).
 
 ## Managed MCP HTTP
 
-The foreground `mcp http` server binds only to loopback and exits with a clear bind error if another listener owns its port. The daemon-managed listener is persistent and disabled by default. Inspecting saved state does not start a stopped daemon:
+The foreground `mcp http` server binds only to loopback, always requires bearer authentication, and exits with a clear bind error if another listener owns its port. Managed settings do not change its authentication or binding. The daemon-managed listener is persistent and defaults to disabled, loopback-only, and `non-loopback` authentication. Inspecting saved state does not start a stopped daemon:
 
 ```powershell
 fiddler-classic-cli mcp service status
-fiddler-classic-cli mcp service configure --bind loopback --port 8877
+fiddler-classic-cli mcp service configure --bind loopback --port 8877 --authentication non-loopback
 fiddler-classic-cli mcp service enable
 fiddler-classic-cli mcp service disable
 ```
 
-Bind mode `loopback` uses `127.0.0.1`. `all` uses IPv4 `0.0.0.0`. Disable the service before changing the bind mode or port. Enabling `all` requires confirmation at an interactive warning or `--yes` because bearer credentials travel over plain HTTP and can be reused if observed. Disabling a stopped service still updates saved state. Disabling the service while connections are active requires confirmation.
+`mcp service configure` accepts these options. Omitted options keep their saved values:
+
+| Option | Values and behavior |
+| --- | --- |
+| `--bind` | `loopback` binds `127.0.0.1`, `all` binds IPv4 `0.0.0.0`, and `selected` binds the explicit addresses supplied with `--address`. |
+| `--address` | Repeat for each selected active local IPv4 address, up to 16 unique dotted-decimal unicast addresses. Requires `--bind selected` or a saved `selected` mode. Configuration saves the actual IP addresses. |
+| `--port` | A shared port from 1 through 65535 for every configured address. |
+| `--startup` | `enabled`, `disabled`, or `last-state` (the default). Controls service state at startup. |
+| `--authentication` | `required` checks every request, `non-loopback` (the default) exempts connections whose remote and local socket IPs are both loopback, and `none` skips bearer checks. Applies only to the managed listener. |
+| `--yes` | Confirms security warnings without an interactive prompt. Required for such changes when stdin is redirected. |
+
+Fresh or unset configuration uses `non-loopback`. Existing explicit legacy config-file `HttpRequireAuthentication` values load as `required` for `true` and `none` for `false`. The config file stores the string `HttpAuthenticationMode`. Wire and CLI service JSON use `authenticationMode`.
+
+The `non-loopback` exemption uses both actual socket IPs after normalizing IPv4-mapped addresses. Requests to a LAN address require a bearer credential even from the same machine. If either address is unknown, authentication is required. `Host`, `Forwarded`, and `X-Forwarded-For` cannot grant the exemption. Exempt requests are anonymous, have full MCP access, and receive no credential attribution even if they carry a bearer token.
+
+Disable the service before changing the bind mode, selected addresses, port, or authentication. A startup-only change is allowed while running. For example, after inspecting `availableInterfaces` in `mcp service status --json`, select addresses that exist on this machine:
+
+```powershell
+fiddler-classic-cli mcp service configure --bind selected --address 127.0.0.1 --address 192.168.1.10 --port 8877
+fiddler-classic-cli mcp service enable --yes
+```
+
+Replace the example LAN address with an active local IPv4 address. Supplying `--bind selected` requires at least one `--address`. With selected mode already saved, `--address` replaces its address list. Switching to `loopback` or `all` clears that list. The service binds each selected address explicitly. If one is unavailable at startup, it reports a bind error and leaves the daemon available. It never substitutes another address or falls back to listening on all interfaces. Review the selection after DHCP or adapter changes.
+
+Enabling remote access requires confirmation at an interactive warning or `--yes`. With `required` or `non-loopback`, the warning explains that bearer credentials travel over plain HTTP and can be reused if observed. With `none`, it explains that every reachable client gains full MCP access. Saving or enabling loopback-only `non-loopback` needs no access-risk confirmation. Saving or enabling `none` requires confirmation even on loopback. Disabling a stopped service still updates saved state. Disabling the service while connections are active requires confirmation.
+
+Startup policy applies when the daemon starts and when Fiddler loads the extension, including when a daemon is already running. `enabled` starts the listener, `disabled` stops it, and `last-state` preserves the saved desired enabled state. A new installation remains disabled. Changing the policy saves it for the next startup and leaves the current service state unchanged. Use `service enable` or `service disable` for an immediate change. Any configuration update whose resulting policy is `enabled` requires confirmation if it permits remote access or uses mode `none`:
+
+```powershell
+fiddler-classic-cli mcp service configure --startup enabled --yes
+fiddler-classic-cli mcp service configure --startup disabled
+fiddler-classic-cli mcp service configure --startup last-state
+```
+
+To skip all managed bearer checks with `none`, first disable the service, then explicitly confirm the risk:
+
+```powershell
+fiddler-classic-cli mcp service disable --yes
+fiddler-classic-cli mcp service configure --authentication none --yes
+fiddler-classic-cli mcp service enable --yes
+```
+
+Every client that can reach a listener in mode `none` can read captured traffic and invoke all MCP tools, including mutations. Local processes, including processes under other Windows accounts, have the same access through the default `non-loopback` loopback exemption. Named pipes remain restricted to the current Windows user. Local relays or reverse proxies connecting through loopback appear as loopback peers. Choose `required` if loopback callers or relays must authenticate. Per-tool confirmation arguments remain required where documented, but any connected client can supply them. To require credentials for every request, disable the service and configure `--authentication required` before enabling it again. Use `--authentication non-loopback` to restore the default exemption. Named and default credentials remain saved in all modes. They do not restrict access or identify anonymous requests. All modes reject Origin-bearing requests. Anonymous requests, including loopback exemptions, must also use a Host header matching the receiving socket's actual IP address and port, or `localhost` with that port on loopback. Custom DNS names are rejected for anonymous requests. The project does not enable CORS or configure TLS or firewall rules.
 
 Offline administration requires both an unanswered connection attempt and exclusive access to the daemon's ownership pipe. A timeout from a connected or busy daemon produces an error (`timeout`, exit code 6). In that case, administration does not read saved state as if it were live, write configuration offline, or launch another daemon. Retry the status query before taking further action. Malformed responses and disconnected peers also produce errors.
+
+Invalid modes, ports, or address lists return exit code 2. Missing confirmation and attempts to change listener settings while enabled return 5. An enable-time bind failure returns 4 and can leave `enabled: true` with `running: false`. Check `lastError`, then disable the service before editing its settings. Startup bind failures also leave the daemon available for status and configuration. With `--json`, failures use the structured error on stderr and successful commands return the service status object.
 
 The default CLI token is available through `config token show|rotate`. Named clients receive independent 256-bit tokens:
 
@@ -253,7 +297,7 @@ fiddler-classic-cli mcp clients deauthorize <client-id> --yes
 
 The command prints an authorization token once and stores only its SHA-256 hash. Names contain 1 to 64 characters and must be unique without regard to case. Up to 64 named clients are allowed. Deauthorizing the `default` client rotates the default CLI token. Deauthorization requires confirmation and aborts active connections for that credential. An operation already dispatched may have completed.
 
-Foreground and managed listeners use the same configured credentials. Rotation and revocation take effect on subsequent requests without a listener restart. Connection inspection and forced disconnection cover only the daemon-managed listener. Revocation does not abort a foreground operation that has already been dispatched.
+Foreground and managed requests that require authentication use the same configured credentials. Rotation and revocation take effect on subsequent requests without a listener restart. Connection inspection and forced disconnection cover only the daemon-managed listener. Revocation does not abort a foreground operation that has already been dispatched. Revoking a credential cannot block anonymous access through `none` or the `non-loopback` loopback exemption.
 
 Connection inspection returns only operational metadata:
 
@@ -262,19 +306,31 @@ fiddler-classic-cli mcp connections list
 fiddler-classic-cli mcp connections disconnect <connection-id> --yes
 ```
 
-Records include the connection ID, remote endpoint, authorization and client state, connection and activity times, and active and total request counts. They never include URLs, headers, tokens, or captured traffic. Disconnecting requires confirmation and aborts the selected transport connection.
+Records include the connection ID, remote endpoint, authorization and client state, connection and activity times, and active and total request counts. They never include URLs, headers, tokens, or captured traffic. Requests in mode `none` and exempt loopback requests in `non-loopback` are recorded as `anonymous` without token-client attribution. Disconnecting requires confirmation and aborts the selected transport connection.
 
-The **Fiddler Classic CLI** tab provides the same controls and displays clients, connections, errors, and component versions. Its Tools menu entry focuses the tab. These controls manage MCP HTTP and do not change Fiddler's capture proxy. The extension starts or discovers the daemon during load, even when the tab is never opened. Each refresh rereads the configured host and running daemon versions, including after a daemon restart. Unloading cancels extension work and leaves the daemon running.
+The **Fiddler Classic CLI** tab contains native **MCP**, **Named pipes**, and **Settings** subtabs. Its Tools menu entry focuses the pane. MCP has an **Enable MCP HTTP** checkbox followed by Bind, Port, and Apply/Refresh. The **MCP addresses** box below these buttons groups loopback and LAN URLs. **Authorized clients** and **Active connections** have separate boxes. The **selected** bind mode provides a checkbox list of local IPv4 addresses and adapter names. These controls manage MCP HTTP independently of Fiddler's capture proxy.
 
-While the service is disabled, refresh preserves pending bind and port edits. Click **Apply** before enabling the service. If another client enables it, the fields show the active settings and become read-only. Refresh also preserves grid selection and scroll position. If the selected client or connection disappears, the tab clears that selection and disables its action button.
+Settings contains startup and authentication dropdowns, each followed by its own explanation. Authentication choices are **Require for all** (`required`), **Non-loopback only** (`non-loopback`, the default), and **No authentication** (`none`). Click **Save settings** to apply changes. It also has a **Versions** box for Fiddler, the bridge, protocol, configured host, and running daemon, plus a **Documentation** box with project and documentation links. Each refresh rereads the configured host and running daemon versions, including after a daemon restart. Named pipes displays read-only [pipe diagnostics](installation.md#named-pipes) directly on the subtab, without a surrounding box.
 
-The tab uses a custom terminal icon with a white `>_` prompt, drawn at Fiddler's tab-icon size without an external image file. Service labels and values align in columns, with separate Bind and Port rows. Buttons and long status or version text wrap as the pane narrows. Scroll down when the sections no longer fit vertically. The extension leaves Fiddler's DPI compatibility settings unchanged.
+The extension starts or discovers the daemon and applies the startup policy during load, even when the tab is never opened. Unloading cancels extension work and leaves the daemon running.
+
+Bind and Port remain editable while MCP HTTP is enabled. Refresh preserves pending edits, and displayed URLs continue to reflect the applied settings. Clicking **Apply** with changed bindings stops an enabled listener, saves the settings, and starts it again. The panel confirms remote access or mode `none` and active-client disconnection before stopping it. Cancelling leaves the listener unchanged. A failed step stops the sequence, retains the edits, and displays the error. Check the checkbox and error before retrying. Applying unchanged bindings leaves the listener running. CLI configuration still requires an explicit disable first. Authentication changes also require the service to be disabled, while startup policy stays editable. Refresh preserves grid selection and scroll position. If the selected client or connection disappears, the tab clears that selection and disables its action button.
+
+Background refreshes update changed cells and add or remove rows as clients and connections change. Existing rows keep their position unless you sort the grid. Actions remain available during a read. Clicking an action captures its target and inputs, waits for the current read, and temporarily disables further actions until it finishes. Refresh buttons stay disabled while a read is in progress.
+
+The tab uses a custom terminal icon with a white `>_` prompt, drawn at Fiddler's tab-icon size without an external image file. Service labels and values align in columns, with separate Bind and Port rows. The selected-interface checklist uses `UseCompatibleTextRendering=false` to match the text rendering of surrounding native controls. Action buttons share font-based heights and spacing, including in the authorization dialogs. Grid rows grow with the font and use Windows colors for their backgrounds, text, and selection. Buttons and long status or version text wrap as the pane narrows. Scroll down when the sections no longer fit vertically. The extension leaves Fiddler's DPI compatibility settings unchanged.
 
 Tab control requests and daemon startup each have a ten-second deadline. After a timeout, check service status before retrying because the operation may have completed. Configuration transactions wait up to five seconds for another CLI or daemon update. Failure to acquire the lock in that time reports `timeout` (CLI exit code 6).
 
-The tab always provides a loopback URL and a **Copy loopback** button. In `all` mode it also shows up to eight distinct IPv4 URLs from active non-loopback adapters, each with its own **Copy LAN** button. These address hints do not test reachability. The user remains responsible for routing and Windows Firewall. Service JSON contains `endpoint` as bind metadata and `loopbackEndpoint` and `lanEndpoints` for client URLs. Use the latter fields when connecting clients. Disabled service settings can still have address hints.
+Every displayed URL has an adjacent copy button. Loopback is available in `loopback` and `all` modes, and in `selected` mode when the selection includes loopback. In `all` mode, the pane also shows up to eight distinct IPv4 URL hints from active non-loopback adapters. In `selected` mode, LAN URLs correspond only to the selected addresses. These hints do not test reachability. The user remains responsible for routing and Windows Firewall. Disabled service settings can still have address hints.
+
+Service JSON reports `bindAddresses` and `endpoints` arrays for the listener bindings. The singular `bindAddress` and `endpoint` fields describe the first binding. `availableInterfaces` lists up to 64 selectable entries with `address` and `adapterName`. While running, binding, port, and `authenticationMode` describe the settings actually applied to the listener. Otherwise, they describe saved settings. `startupMode` and the desired `enabled` state always reflect saved preferences. `loopbackEndpoint` is empty when selected bindings exclude loopback, and `lanEndpoints` contains the applicable LAN URLs. In `all` mode, `0.0.0.0` is bind metadata. Use a concrete address from the client URL fields when connecting.
+
+Change listener settings through the panel or `mcp service configure`. Editing the configuration file directly does not reconfigure a running listener. Disable it, apply the intended changes, then enable it again.
 
 Controls have accessible names, explicit tab order, and keyboard mnemonics. Use Tab/Shift+Tab to move between controls, Alt+B for bind mode, Alt+P for port, and the underlined button letters for actions. Layout tests cover narrow panes and enlarged fonts without changing Fiddler's DPI settings.
+
+URLs and named-pipe addresses are read-only text fields. Drag to select part of an address, or focus it with Tab and press Ctrl+A to select the whole address, then Ctrl+C to copy. Resizing and unchanged refreshes preserve selection. The adjacent copy button always copies the full address.
 
 ## Output
 
@@ -296,7 +352,9 @@ fiddler-classic-cli sessions list --host example.test --limit 20 --json
 
 After the first bridge installation, check Fiddler for "Caution: Unverified Extension Detected" windows if the tab is missing or bridge commands cannot connect. Fiddler can prompt separately for the bridge DLL and the protocol DLL. Review both files and handle the prompts manually before retrying. See [extension approval](installation.md#fiddler-bridge).
 
-If a client cannot negotiate MCP, check that its configured executable and the running daemon use the intended installed build. Restart the relevant server process after an upgrade. For revision `2026-07-28`, inspect a 400 response's JSON-RPC error before retrying. Resolve missing-header errors using that revision's request requirements. HTTP 403 indicates an `Origin` header, which native clients should omit. Do not enable CORS to bypass this restriction.
+If a client cannot negotiate MCP, check that its configured executable and the running daemon use the intended installed build. Restart the relevant server process after an upgrade. For revision `2026-07-28`, inspect a 400 response's JSON-RPC error before retrying. Resolve missing-header errors using that revision's request requirements. For HTTP 403, omit `Origin` in native clients and use a displayed listener URL with its matching Host header. Neither `none` nor the `non-loopback` exemption bypasses Origin or anonymous Host checks. Do not enable CORS to bypass this restriction.
+
+If a selected binding fails after a network change, compare saved `bindAddresses` with `availableInterfaces`. Disable the service, select the intended active local addresses, and apply the change before enabling it again. The listener will not silently widen access. If service state changes when Fiddler or the daemon starts, check **Settings** or `startupMode`. Use `last-state` to preserve the last desired state.
 
 Check daemon, service, and bridge status when a command cannot connect:
 
@@ -313,4 +371,4 @@ fiddler-classic-cli daemon stop
 fiddler-classic-cli daemon start
 ```
 
-Restart an older daemon when the Fiddler tab reports that managed HTTP capability is missing. Restart Fiddler Classic only when `doctor` reports that the extension bridge is not connected. The daemon and managed listener can run while Fiddler is closed. Bridge operations will return an unavailable or timeout error with guidance on resolving it.
+Restart an older daemon when the Fiddler tab reports that the `managed-http-v3` capability is missing. The daemon envelope remains version 1 and the bridge remains version 3. Restart Fiddler Classic only when `doctor` reports that the extension bridge is not connected. The daemon and managed listener can run while Fiddler is closed. Bridge operations will return an unavailable or timeout error with guidance on resolving it.

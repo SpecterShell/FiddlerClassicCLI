@@ -10,7 +10,7 @@ using FiddlerClassicCLI.Protocol;
 
 namespace FiddlerClassicCLI.Tests;
 
-public sealed class ManagedHttpServiceTests : IDisposable
+public sealed partial class ManagedHttpServiceTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "FiddlerClassicCLITests", Guid.NewGuid().ToString("N"));
 
@@ -19,7 +19,8 @@ public sealed class ManagedHttpServiceTests : IDisposable
     {
         var port = GetFreePort();
         var store = new ConfigStore(_directory);
-        store.ConfigureHttpService(HttpBindModes.All, port);
+        store.ConfigureHttpService(new ConfigureHttpServiceRequest { BindMode = HttpBindModes.All, Port = port,
+            AuthenticationMode = HttpAuthenticationModes.Required });
         await using var manager = new HttpServiceManager(store);
         var authorized = manager.AuthorizeClient(new AuthorizeHttpClientRequest { Name = "Integration test" });
 
@@ -56,7 +57,7 @@ public sealed class ManagedHttpServiceTests : IDisposable
     public async Task RemoteEnableRequiresConfirmation()
     {
         var store = new ConfigStore(_directory);
-        store.ConfigureHttpService(HttpBindModes.All, GetFreePort());
+        store.ConfigureHttpService(new ConfigureHttpServiceRequest { BindMode = HttpBindModes.All, Port = GetFreePort() });
         await using var manager = new HttpServiceManager(store);
 
         var exception = await Assert.ThrowsAsync<HttpAdministrationException>(() =>
@@ -71,7 +72,8 @@ public sealed class ManagedHttpServiceTests : IDisposable
     {
         var port = GetFreePort();
         var store = new ConfigStore(_directory);
-        store.ConfigureHttpService(HttpBindModes.Loopback, port);
+        store.ConfigureHttpService(new ConfigureHttpServiceRequest { BindMode = HttpBindModes.Loopback, Port = port,
+            AuthenticationMode = HttpAuthenticationModes.Required });
         var initialToken = store.GetOrCreate().HttpBearerToken;
         await using var manager = new HttpServiceManager(store);
         await manager.EnableAsync(confirmRemote: false, TestContext.Current.CancellationToken);
@@ -94,7 +96,7 @@ public sealed class ManagedHttpServiceTests : IDisposable
     {
         var port = GetFreePort();
         var store = new ConfigStore(_directory);
-        store.ConfigureHttpService(HttpBindModes.Loopback, port);
+        store.ConfigureHttpService(new ConfigureHttpServiceRequest { BindMode = HttpBindModes.Loopback, Port = port });
         store.SetHttpServiceEnabled(true);
         await using var manager = new HttpServiceManager(store);
 
@@ -116,7 +118,7 @@ public sealed class ManagedHttpServiceTests : IDisposable
         occupied.Start();
         var port = ((IPEndPoint)occupied.LocalEndpoint).Port;
         var store = new ConfigStore(_directory);
-        store.ConfigureHttpService(HttpBindModes.Loopback, port);
+        store.ConfigureHttpService(new ConfigureHttpServiceRequest { BindMode = HttpBindModes.Loopback, Port = port });
         await using var manager = new HttpServiceManager(store);
 
         var exception = await Assert.ThrowsAsync<HttpAdministrationException>(() =>

@@ -37,6 +37,8 @@ internal sealed class DiagnosticListenerStatus
     public string? BindMode { get; init; }
     public string? BindAddress { get; init; }
     public int? Port { get; init; }
+    public string? StartupMode { get; init; }
+    public string? AuthenticationMode { get; init; }
 }
 
 internal sealed record DiagnosticError(string Component, string Code, string Message);

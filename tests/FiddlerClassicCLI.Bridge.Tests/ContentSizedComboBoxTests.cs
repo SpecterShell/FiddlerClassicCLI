@@ -68,8 +68,9 @@ public sealed partial class BridgeControlPanelTests
         var previous = SelectObject(dc, font);
         try
         {
-            foreach (var item in bind.Items.Cast<string>())
+            foreach (var choice in bind.Items.Cast<object>())
             {
+                var item = choice.ToString()!;
                 Assert.True(GetTextExtentPoint32(dc, item, item.Length, out var size));
                 Assert.True(size.Width + 4 <= info.Item.Right - info.Item.Left,
                     $"'{item}' uses {size.Width}px of native GDI text plus padding, but only {info.Item.Right - info.Item.Left}px is available.");

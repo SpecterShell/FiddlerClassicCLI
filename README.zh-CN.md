@@ -149,13 +149,13 @@ stdio 传输只将 JSON-RPC 协议消息写入 stdout，主程序诊断信息写
 ./fiddler-classic-cli.exe mcp http
 ```
 
-前台服务器采用无状态模式，仅绑定回环地址。两种 HTTP 模式均对包含 `Origin` 标头的请求返回 HTTP 403，不允许浏览器访问，也不启用 CORS。默认端点为 `http://127.0.0.1:8877/mcp`，请求必须携带以下授权头：
+前台服务器采用无状态模式，仅绑定回环地址，始终要求身份验证。前台和托管 HTTP 服务器在所有身份验证模式下都拒绝包含 `Origin` 标头的请求，匿名托管请求还须通过 `Host` 校验以防止 DNS 重绑定。不允许浏览器访问，也不启用 CORS。默认端点为 `http://127.0.0.1:8877/mcp`，前台请求必须携带以下授权头：
 
 ```http
 Authorization: Bearer <token>
 ```
 
-使用 `config token show` 查看默认令牌，使用 `config token rotate` 替换令牌。前台和托管 HTTP 监听器都接受默认凭据与命名客户端凭据，并在凭据轮换或撤销后的后续请求中重新加载。守护进程可以运行持续提供服务的托管监听器：
+使用 `config token show` 查看默认令牌，使用 `config token rotate` 替换令牌。请求需要身份验证时，HTTP 监听器接受默认凭据与命名客户端凭据，并在凭据轮换或撤销后的后续请求中重新加载。守护进程可以运行持续提供服务的托管监听器：
 
 ```powershell
 fiddler-classic-cli mcp service configure --bind loopback --port 8877
@@ -164,11 +164,17 @@ fiddler-classic-cli mcp clients authorize --name "Local agent"
 fiddler-classic-cli mcp connections list
 ```
 
-命名客户端令牌只显示一次，配置中只保存其 SHA-256 哈希。将托管服务绑定到 `0.0.0.0` 必须明确确认，因为 Bearer 凭据通过明文 HTTP 传输，任何监听到凭据的人都可以重复使用。本项目不会配置 TLS、防火墙规则或 CORS。配置保存在 `%LOCALAPPDATA%\FiddlerClassicCLI\config.json`，由仅允许当前用户访问的 ACL 保护。
+命名客户端令牌只显示一次，配置中只保存其 SHA-256 哈希。托管 HTTP 默认禁用、仅绑定回环地址，身份验证模式为 `non-loopback`。该模式先将 IPv4 映射地址转换为 IPv4，仅在实际套接字的远端和本地 IP 都是回环地址时跳过 Bearer 检查。即使请求来自本机，访问局域网地址仍须提供 Bearer 凭据。套接字地址未知时不予豁免，`Host`、`Forwarded` 和 `X-Forwarded-For` 也不能获得豁免。它也可监听所有 IPv4 接口，或最多 16 个选定的活动本地 IPv4 地址。启用远程访问需要确认，因为 Bearer 凭据通过明文 HTTP 传输，任何监听到凭据的人都可以重复使用。本项目不会配置 TLS、防火墙规则或 CORS。配置保存在 `%LOCALAPPDATA%\FiddlerClassicCLI\config.json`，由仅允许当前用户访问的 ACL 保护。
 
-管理标签页带有终端图标。面板变窄时操作按钮会自动换行，刷新时会保留编辑内容和选中项。控件支持键盘操作，每个回环或局域网 URL 旁都有剪贴板复制按钮，服务状态文字旁有彩色状态灯。[托管 HTTP 控制](docs/zh-CN/cli.md#托管-mcp-http)说明了如何应用设置和处理超时，并列出地址限制。
+服务禁用时可使用 `mcp service configure --authentication required|non-loopback|none`。`required` 检查每个请求，`non-loopback` 为默认值，`none` 则对所有客户端跳过 Bearer 检查。保存或启用 `none` 需要确认，因为所有可达客户端都将获得完整 MCP 权限，包括抓包流量和修改工具。仅绑定回环地址时，保存或启用 `non-loopback` 无需访问风险确认。凭据仍会保留，但匿名请求不会归属到任何凭据，且必须通过基于接收套接字的 Host 校验。前台 `mcp http` 始终要求身份验证。命令和警告说明见[托管 HTTP 设置](docs/zh-CN/cli.md#托管-mcp-http)。
 
-独立的只读 [Named pipes 区域](docs/zh-CN/installation.md#命名管道)显示桥接和守护进程的管道路径、监听器状态与状态检查结果、协议版本及守护进程详情，并提供路径复制按钮。**Refresh pipes** 仅读取状态，不会启动守护进程或更改监听器。
+在默认 `non-loopback` 模式下，本机进程（包括其他 Windows 账户下的进程）可以匿名访问回环 MCP。命名管道则仅允许当前 Windows 用户访问。通过回环连接的本地中继或反向代理会被视为回环对端；如需回环调用方或中继也验证身份，请选择 `required`。
+
+管理标签页带有终端图标，包含原生 **MCP**、**Named pipes** 和 **Settings** 子标签页。MCP 顶部提供 **Enable MCP HTTP** 复选框，以及可编辑的 Bind 和 Port 控件。**Apply** 保存待应用的修改，并在完成必要确认后重启已启用的监听器。Apply/Refresh 下方的 **MCP addresses** 分组框集中显示 URL，客户端与连接各有独立的分组框。Settings 中的启动策略和带说明性选项的身份验证下拉框各有独立说明，另有组件版本、项目和文档链接。启动策略可选择启用服务、禁用服务或恢复上次状态，默认为 `last-state`，因此新安装仍保持禁用。
+
+接口选择列表使用原生文字渲染，与周围控件保持一致。操作按钮高度统一，面板变窄时会自动换行。刷新只更新有变化的单元格，并保留编辑内容、选中项和滚动位置。后台读取期间仍可点击操作按钮，操作会等待当前读取完成后执行。控件支持键盘操作，鼠标悬停在按钮上时会显示操作说明。每个可用的回环或局域网 URL 旁都有剪贴板复制按钮，复制成功后短暂显示 **Copied!**，按钮宽度随当前文字调整。[托管 HTTP 控制](docs/zh-CN/cli.md#托管-mcp-http)说明了如何应用设置和处理超时，并列出地址限制。
+
+只读 [Named pipes 子标签页](docs/zh-CN/installation.md#命名管道)显示桥接和守护进程的管道路径、监听器状态与状态检查结果、协议版本及守护进程详情，复制按钮紧邻各个路径右侧。URL 和管道地址支持选中文本后按 Ctrl+C 复制。**Refresh pipes** 仅读取状态，不会启动守护进程或更改监听器。
 
 ### 检查工具
 
@@ -232,8 +238,8 @@ MCP 接口采用可组合的小型列表和详情调用，沿用 [Chrome DevTool
 抓包流量是原始证据。桥接不会脱敏、标准化或静默转换标头与正文。显式输出可能包含密码、Cookie、Bearer 令牌、API 密钥和个人数据。请将终端输出、MCP 对话记录、正文文件和 SAZ 归档作为敏感证据保护。
 
 - 桥接和 CLI 守护进程的命名管道仅允许当前 Windows 用户访问。
-- MCP HTTP 默认禁用并仅绑定回环地址。绑定到 IPv4 `0.0.0.0` 前必须明确确认明文凭据风险。
-- 每个 HTTP 请求都必须携带 256 位 Bearer 凭据。命名客户端令牌只保存 SHA-256 哈希。默认 CLI 令牌为兼容而保留，仍可在当前用户 ACL 保护下读取。
+- 托管 MCP HTTP 默认禁用、仅绑定回环地址，身份验证模式为 `non-loopback`。启用远程访问，以及保存或启用 `none` 均须明确确认风险。选定绑定保存具体的 IPv4 地址，地址不可用时启动失败。
+- 启用身份验证时，HTTP 请求必须携带 256 位 Bearer 凭据。命名客户端令牌只保存 SHA-256 哈希，默认 CLI 令牌仍可在当前用户 ACL 保护下读取。`none` 模式下，所有可达客户端都拥有完整 MCP 权限。`non-loopback` 仅在套接字两端 IP 都是回环地址时豁免验证，并授予相同权限。Origin 拒绝规则和 Host 校验仍然有效。
 - 输入校验会检查标头名称和值，并拒绝 CRLF 注入。
 - 协议帧、请求正文、结果数量和 MCP 正文分块均有上限。
 - 托管断点触发器默认为一次性，并在有限等待时间后自动继续暂停的流量。

@@ -149,13 +149,13 @@ The stdio transport reserves stdout for JSON-RPC protocol messages. Host diagnos
 ./fiddler-classic-cli.exe mcp http
 ```
 
-The foreground server is stateless and binds only to loopback. Both HTTP modes reject requests containing an `Origin` header with HTTP 403. Browser access and CORS are disabled. The default endpoint is `http://127.0.0.1:8877/mcp`. Requests require the following authorization header:
+The foreground server is stateless, binds only to loopback, and always requires authentication. Both foreground and managed HTTP servers reject requests containing an `Origin` header in every authentication mode. Anonymous managed requests also undergo `Host` validation against DNS rebinding. Browser access and CORS are disabled. The default endpoint is `http://127.0.0.1:8877/mcp`. Foreground requests require the following authorization header:
 
 ```http
 Authorization: Bearer <token>
 ```
 
-Read the default token with `config token show` and replace it with `config token rotate`. Foreground and managed HTTP listeners accept default and named credentials and reload them on subsequent requests after rotation or revocation. The daemon can run a persistent managed listener:
+Read the default token with `config token show` and replace it with `config token rotate`. When authentication is required for a request, HTTP listeners accept default and named credentials and reload them on subsequent requests after rotation or revocation. The daemon can run a persistent managed listener:
 
 ```powershell
 fiddler-classic-cli mcp service configure --bind loopback --port 8877
@@ -164,11 +164,17 @@ fiddler-classic-cli mcp clients authorize --name "Local agent"
 fiddler-classic-cli mcp connections list
 ```
 
-Named client tokens are displayed only once. Configuration stores only their SHA-256 hashes. Binding the managed service to `0.0.0.0` requires explicit confirmation because bearer credentials travel over plain HTTP and anyone who observes them can reuse them. The project does not configure TLS, firewall rules, or CORS. It stores configuration at `%LOCALAPPDATA%\FiddlerClassicCLI\config.json` under an ACL restricted to the current user.
+Named client tokens are displayed only once. Configuration stores only their SHA-256 hashes. Managed HTTP defaults to disabled, loopback-only, and `non-loopback` authentication. This mode skips bearer checks only when both actual socket IPs are loopback, after normalizing IPv4-mapped addresses. Requests to a LAN address require a bearer credential even from the same machine. Unknown socket addresses do not qualify for the exemption; `Host`, `Forwarded`, and `X-Forwarded-For` cannot grant it. It can also listen on all IPv4 interfaces or up to 16 selected active local IPv4 addresses. Remote enablement requires confirmation because bearer credentials travel over plain HTTP and anyone who observes them can reuse them. The project does not configure TLS, firewall rules, or CORS. It stores configuration at `%LOCALAPPDATA%\FiddlerClassicCLI\config.json` under an ACL restricted to the current user.
 
-The management tab has a terminal icon. Its action buttons wrap as the pane narrows, and it preserves edits and selections during refresh. The controls support keyboard access. Clipboard buttons sit beside each loopback or LAN URL, and a colored light accompanies the service status text. See [managed HTTP controls](docs/en-US/cli.md#managed-mcp-http) for instructions on applying settings and handling timeouts, and for address limitations.
+Use `mcp service configure --authentication required|non-loopback|none` while the service is disabled. `required` checks every request, `non-loopback` is the default, and `none` skips bearer checks for all clients. Saving or enabling `none` requires confirmation because every reachable client gains full MCP access, including captured traffic and mutation tools. Saving or enabling loopback-only `non-loopback` needs no access-risk confirmation. Credentials remain saved, but anonymous requests have no credential attribution and must pass Host validation against the receiving socket. Foreground `mcp http` always requires authentication. See [managed HTTP settings](docs/en-US/cli.md#managed-mcp-http) for commands and warnings.
 
-The separate, read-only [Named pipes section](docs/en-US/installation.md#named-pipes) shows bridge and daemon pipe paths with copy buttons, listener and status-check results, protocol versions, and daemon process details. **Refresh pipes** reads status without starting the daemon or changing listeners.
+Local processes, including processes under other Windows accounts, can reach anonymous loopback MCP in the default `non-loopback` mode. The named pipes are restricted to the current Windows user. Local relays and reverse proxies that connect through loopback appear as loopback peers; choose `required` if loopback callers or relays must authenticate.
+
+The management tab has a terminal icon and native **MCP**, **Named pipes**, and **Settings** subtabs. MCP starts with an **Enable MCP HTTP** checkbox and editable Bind and Port controls. **Apply** saves pending changes and restarts an enabled listener after the required confirmations. The **MCP addresses** box below Apply/Refresh groups its URLs. Clients and connections have separate boxes. Settings contains the startup policy and authentication dropdown with descriptive choices, each with its own explanation, plus component versions and project and documentation links. Startup can enable the service, disable it, or restore its last state. The default is `last-state`, which leaves a new installation disabled.
+
+The selected-interface checklist uses native text rendering to match surrounding controls. Action buttons share consistent heights and wrap as the pane narrows. Refresh updates changed cells while preserving edits, selections, and scrolling. Actions remain available during background reads and wait for an in-flight read before running. The controls support keyboard access, and button tooltips explain each action. Clipboard buttons sit beside each available loopback or LAN URL and briefly show **Copied!** after a successful copy. Their width follows the displayed caption. See [managed HTTP controls](docs/en-US/cli.md#managed-mcp-http) for instructions on applying settings and handling timeouts, and for address limitations.
+
+The read-only [Named pipes subtab](docs/en-US/installation.md#named-pipes) shows bridge and daemon pipe paths with copy buttons immediately to their right, listener and status-check results, protocol versions, and daemon process details. URLs and pipe addresses support text selection and Ctrl+C. **Refresh pipes** reads status without starting the daemon or changing listeners.
 
 ### Inspection tools
 
@@ -232,8 +238,8 @@ The repository contains the English Agent Skill package at `skills/fiddler-class
 Captured traffic is evidence. The bridge does not redact, normalize, or silently transform headers or bodies. Explicit output can contain passwords, cookies, bearer tokens, API keys, and personal data. Protect terminal output, MCP transcripts, body files, and SAZ archives as sensitive evidence.
 
 - The bridge and CLI daemon named pipes permit only the current Windows user.
-- MCP HTTP is disabled and loopback-only by default. Binding to IPv4 `0.0.0.0` requires an explicit plaintext credential warning.
-- Every HTTP request requires a 256-bit bearer credential. Named client tokens are stored only as SHA-256 hashes. The default CLI token, retained for compatibility, remains readable under a current-user ACL.
+- Managed MCP HTTP is disabled and loopback-only by default, with `non-loopback` authentication. Remote enablement and saving or enabling `none` require explicit risk confirmation. Selected bindings retain exact IPv4 addresses and fail if an address is unavailable.
+- Authenticated HTTP requests require a 256-bit bearer credential. Named client tokens are stored only as SHA-256 hashes. The default CLI token remains readable under a current-user ACL. The `none` mode grants full MCP access to every reachable client. The `non-loopback` exemption grants the same access only when both socket IPs are loopback. Origin rejection and Host validation still apply.
 - Input validation checks header names and values and rejects CRLF injection.
 - Frames, request bodies, result counts, and MCP body chunks are bounded.
 - Managed breakpoint arms default to one match, and their pauses automatically resume after a bounded hold timeout.
