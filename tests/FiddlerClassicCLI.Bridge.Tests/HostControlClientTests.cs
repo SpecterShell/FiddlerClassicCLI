@@ -14,10 +14,14 @@ public sealed class HostControlClientTests
     public async Task TimesOutAConnectedPeerThatNeverCompletesItsResponse(bool partialFrame)
     {
         using var server = CreateServer(out var pipeName);
-        var client = new HostControlClient(pipeName, TimeSpan.FromMilliseconds(500));
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        // The exchange deadline includes cold-start serialization and pipe scheduling on CI.
+        var client = new HostControlClient(pipeName, TimeSpan.FromSeconds(5));
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        // Framework pipe reads need disposal to interrupt pending I/O if the test deadline expires.
+        using var abortOnCancellation = deadline.Token.Register(server.Dispose);
+        var connection = server.WaitForConnectionAsync(deadline.Token);
         var exchange = client.GetServiceStatusAsync(deadline.Token);
-        await server.WaitForConnectionAsync(deadline.Token);
+        await connection;
         Assert.NotNull(await FrameCodec.ReadAsync(server, deadline.Token));
         if (partialFrame)
         {
