@@ -4,7 +4,7 @@
     <OutputType>Exe</OutputType>
     <AssemblyName>fiddler-classic-cli</AssemblyName>
     <RootNamespace>FiddlerClassicCLI.Host</RootNamespace>
-    <Version>0.3.0-preview.1</Version>
+    <Version>0.4.0</Version>
     <PublishSingleFile Condition="'$(PublishSingleFile)' == ''">false</PublishSingleFile>
     <!-- The CLI uses Kestrel directly and has no IIS deployment or static web assets. -->
     <IsTransformWebConfigDisabled>true</IsTransformWebConfigDisabled>
