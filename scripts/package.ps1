@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Builds the self-contained Windows release and its checksum manifest.
+Builds and stages the standalone Windows executable as the only release file.
 
 .PARAMETER Configuration
 The .NET build configuration.
@@ -25,9 +25,8 @@ $ErrorActionPreference = "Stop"
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $publishDirectory = Join-Path $repositoryRoot "artifacts/publish/win-x64"
 $releaseDirectory = Join-Path $repositoryRoot "artifacts/release"
-$assetName = "fiddler-classic-win-x64.zip"
-$assetPath = Join-Path $releaseDirectory $assetName
-$checksumPath = Join-Path $releaseDirectory "SHA256SUMS"
+$executableName = "fiddler-classic-cli.exe"
+$executablePath = Join-Path $releaseDirectory $executableName
 
 if (-not $SkipBuild) {
     & "$PSScriptRoot/build.ps1" `
@@ -36,17 +35,10 @@ if (-not $SkipBuild) {
         -Version $Version
 }
 
-if (-not (Test-Path "$publishDirectory/fiddler-classic.exe" -PathType Leaf)) {
-    throw "The published CLI was not found at '$publishDirectory'. Run scripts/build.ps1 first."
-}
+& "$PSScriptRoot/verify-release.ps1" -ReleaseDirectory $publishDirectory
+$hash = (Get-FileHash -LiteralPath (Join-Path $publishDirectory $executableName) -Algorithm SHA256).Hash
+& "$PSScriptRoot/reset-artifact-directory.ps1" -Directory 'release'
+Copy-Item -LiteralPath (Join-Path $publishDirectory $executableName) -Destination $executablePath -Force
+& "$PSScriptRoot/verify-release.ps1" -ReleaseDirectory $releaseDirectory -ExpectedSha256 $hash
 
-New-Item -ItemType Directory -Path $releaseDirectory -Force | Out-Null
-Compress-Archive -Path "$publishDirectory/*" -DestinationPath $assetPath -CompressionLevel Optimal -Force
-
-$hash = (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
-[System.IO.File]::WriteAllText($checksumPath, "$hash  $assetName`n", [System.Text.UTF8Encoding]::new($false))
-
-& "$PSScriptRoot/verify-release.ps1" -ReleaseDirectory $releaseDirectory
-
-Write-Host "Release asset: $assetPath"
-Write-Host "Checksums:    $checksumPath"
+Write-Host "Release executable: $executablePath"

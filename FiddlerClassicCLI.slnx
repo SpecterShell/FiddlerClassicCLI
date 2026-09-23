@@ -1,7 +1,7 @@
 <Solution>
-  <Project Path="src/FiddlerClassic.Protocol/FiddlerClassic.Protocol.csproj" />
-  <Project Path="src/FiddlerClassic.Bridge/FiddlerClassic.Bridge.csproj" />
-  <Project Path="src/FiddlerClassic.Host/FiddlerClassic.Host.csproj" />
-  <Project Path="tests/FiddlerClassic.Tests/FiddlerClassic.Tests.csproj" />
-  <Project Path="tests/FiddlerClassic.Bridge.Tests/FiddlerClassic.Bridge.Tests.csproj" />
+  <Project Path="src/FiddlerClassicCLI.Protocol/FiddlerClassicCLI.Protocol.csproj" />
+  <Project Path="src/FiddlerClassicCLI.Bridge/FiddlerClassicCLI.Bridge.csproj" />
+  <Project Path="src/FiddlerClassicCLI.Host/FiddlerClassicCLI.Host.csproj" />
+  <Project Path="tests/FiddlerClassicCLI.Tests/FiddlerClassicCLI.Tests.csproj" />
+  <Project Path="tests/FiddlerClassicCLI.Bridge.Tests/FiddlerClassicCLI.Bridge.Tests.csproj" />
 </Solution>

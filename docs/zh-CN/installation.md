@@ -2,78 +2,151 @@
 
 [English (en-US)](../en-US/installation.md) | **简体中文 (zh-CN)**
 
-Fiddler Classic CLI 以自包含 Windows x64 目录发布。默认情况下，安装脚本写入当前用户的本地应用数据目录，并更新其 `PATH`。Fiddler 桥接扩展需要单独安装。
+Fiddler Classic CLI 以单个自包含 Windows x64 可执行文件 `fiddler-classic-cli.exe` 发布，其中嵌入了 .NET 运行时、托管依赖、桥接 DLL 和 `LICENSE`。运行时，.NET 默认将原生运行库文件提取到 `%TEMP%\.net`。默认安装目录为 `%LOCALAPPDATA%\Programs\FiddlerClassicCLI`，更新后可执行文件路径保持不变。
 
-## 发布包
+## 最新发布版本
 
-每个发布版本包含两个文件：
-
-- `fiddler-classic-win-x64.zip`
-- `SHA256SUMS`
-
-解压 ZIP 前，请核对其 SHA-256 摘要，所用 `SHA256SUMS` 条目的文件名必须完全一致。在解压目录中运行随附的安装脚本：
+在 PowerShell 中运行引导命令。该命令会执行[仓库的 `scripts/install.ps1`](https://github.com/SpecterShell/FiddlerClassicCLI/blob/main/scripts/install.ps1)，请先检查脚本内容，仅使用可信来源：
 
 ```powershell
-$cliPath = (./install.ps1 | Select-Object -Last 1)
+irm https://raw.githubusercontent.com/SpecterShell/FiddlerClassicCLI/main/scripts/install.ps1 | iex
+```
+
+引导脚本默认从 `SpecterShell/FiddlerClassicCLI` 的最新 GitHub 发布版本下载名称完全一致的 `fiddler-classic-cli.exe`。脚本要求 GitHub 提供有效的 `sha256` 文件摘要，并在执行前验证下载内容。可执行文件或摘要缺失、校验值不匹配时，安装会停止。脚本安装 CLI 和 Fiddler 桥接，将固定安装目录加入当前用户的 `PATH`。安装不会启动 Fiddler、CLI 守护进程或 MCP 服务器，不会安装 Agent Skills，也不会更改证书信任和 HTTPS 解密设置。
+
+终端或 Agent 进程尚未刷新环境变量时，可直接使用安装路径：
+
+```powershell
+$cliPath = Join-Path $env:LOCALAPPDATA "Programs/FiddlerClassicCLI/fiddler-classic-cli.exe"
 & $cliPath --version
 ```
 
-安装脚本会将完整程序复制到 `%LOCALAPPDATA%\Programs\FiddlerClassicCLI\<版本>`，并用该版本目录替换当前用户 `PATH` 中由 Fiddler Classic CLI 管理的目录项。脚本也会更新调用它的 PowerShell 进程中的 `PATH`。长时间运行的 Agent 进程可能已缓存环境变量，请在这些进程中使用脚本返回的 `$cliPath`。
+安装后，运行中的组件仍使用已加载的代码。需要使更新生效时，请显式重启 Fiddler、守护进程及 MCP 服务器或客户端。关闭或重启 Fiddler 前，请保存需要的捕获记录。
 
-替换现有安装前，请停止其前台 MCP 服务器，并运行 `daemon stop`。安装后，使用脚本返回的可执行文件路径重启 MCP 客户端；如需守护进程，再从该构建运行 `daemon start`。运行中的进程会保留已加载的 SDK，仅复制文件不会更新 MCP 支持。安装路径变更后，还须按下方桥接安装步骤更新主程序启动记录。
+## 检查脚本后再运行
 
-如需保持 `PATH` 不变或指定其他当前用户目录，请运行：
-
-```powershell
-$cliPath = (./install.ps1 -InstallRoot "C:/Tools/FiddlerClassicCLI" -NoPathUpdate | Select-Object -Last 1)
-```
-
-## Agent 引导安装
-
-安装脚本位于源码仓库和已解压发布包的根目录。加载随附的 Skill 后，可从包含 `SKILL.md` 的目录定位该共享根目录：
+如需先检查脚本，可将其下载到唯一的临时路径：
 
 ```powershell
-$distributionRoot = Split-Path -Parent (Split-Path -Parent $skillRoot)
-$installerPath = Join-Path $distributionRoot "install.ps1"
+$installerPath = Join-Path ([IO.Path]::GetTempPath()) ("fiddler-classic-cli-" + [guid]::NewGuid() + ".ps1")
+Invoke-WebRequest -UseBasicParsing "https://raw.githubusercontent.com/SpecterShell/FiddlerClassicCLI/main/scripts/install.ps1" -OutFile $installerPath -ErrorAction Stop
+Get-Content -LiteralPath $installerPath
 ```
 
-在已解压的发布目录中，运行 `$installerPath` 且不传递来源参数，即可安装脚本所在目录中的发布程序。单独安装的 Skill 不包含安装脚本。如果 `$installerPath` 不存在，请使用已解压的发布包或可信源码仓库。
-
-根目录中的安装脚本可以从可信 GitHub 仓库下载发布版本。请以 `owner/name` 格式明确传入仓库标识：
+检查脚本后，执行并删除临时副本：
 
 ```powershell
-$cliPath = (& $installerPath -Repository $trustedRepository | Select-Object -Last 1)
-& $cliPath --version
+& $installerPath
+Remove-Item -LiteralPath $installerPath
 ```
 
-安装脚本通过 GitHub API 查找发布版本，并下载 `fiddler-classic-win-x64.zip` 和 `SHA256SUMS`。清单必须包含文件名完全一致的条目，脚本会在解压前验证 SHA-256。需要安装特定版本时，请将完整、准确的发布标签传给 `-Version`。安装私有仓库中的版本时，请在进程环境中设置 `GITHUB_TOKEN`；安装脚本不会输出该令牌。
+## 引导脚本选项
 
-如需安装已经下载的 ZIP，请将 `SHA256SUMS` 保存在同一目录并运行：
+`scripts/install.ps1` 负责安装 CLI。未指定 `-PackagePath` 时，脚本会下载所选 GitHub 发布版本的可执行文件，与当前工作目录无关。
+
+| 参数 | 行为 |
+| --- | --- |
+| `-PackagePath PATH` | 安装显式指定的本地可执行文件、目录或带有相邻校验清单的 ZIP。 |
+| `-Repository owner/name` | 指定 GitHub 仓库，默认为 `SpecterShell/FiddlerClassicCLI`。 |
+| `-Version TAG` | 指定准确的发布标签。省略时获取最新发布版本。 |
+| `-InstallDirectory PATH` | 指定专用的本地绝对安装目录，默认为 `%LOCALAPPDATA%\Programs\FiddlerClassicCLI`。 |
+| `-NoPathUpdate` | 保持 `PATH` 不变。 |
+| `-SkipBridge` | 仅安装 CLI，保留已有桥接和主程序启动记录。 |
+| `-Json` | 返回结构化安装结果。 |
+
+`-PackagePath` 不能与 `-Repository` 或 `-Version` 同时使用。在源码仓库中，可用以下命令安装本地发布目录：
 
 ```powershell
-$cliPath = (& $installerPath -PackagePath $trustedPackagePath | Select-Object -Last 1)
+./scripts/install.ps1 -PackagePath ./artifacts/publish/win-x64
 ```
+
+显式指定的本地 EXE 作为可信来源处理，无需相邻的校验清单：
+
+```powershell
+./scripts/install.ps1 -PackagePath "C:/Downloads/fiddler-classic-cli.exe"
+```
+
+本地 ZIP 要求同一目录中有 `SHA256SUMS`，且其中的 ZIP 文件名和校验值完全匹配。本地目录作为可信输入处理。当前发布版本仅提供 EXE，引导脚本也只下载该文件。GitHub 下载始终要求根据 GitHub 提供的文件 SHA-256 摘要进行验证。访问私有 GitHub 仓库时，请通过进程环境提供 `GITHUB_TOKEN`，不要将其写入日志。
+
+如需指定其他安装目录并保持 `PATH` 不变：
+
+```powershell
+./scripts/install.ps1 -InstallDirectory "C:/Tools/FiddlerClassicCLI" -NoPathUpdate
+```
+
+## 本地开发
+
+在源码仓库中发布当前代码，然后安装该构建：
+
+```powershell
+./scripts/build.ps1
+./scripts/install-local.ps1
+```
+
+`scripts/install-local.ps1` 使用其所在仓库中的 `artifacts/publish/win-x64/fiddler-classic-cli.exe`，不受当前工作目录影响。它将该本地 EXE 作为 `-PackagePath` 传给 `scripts/install.ps1`，不会构建或下载发布版本。如果发布输出不存在，脚本会停止并提示先运行 `scripts/build.ps1`。
+
+默认安装会更新 `%LOCALAPPDATA%\Programs\FiddlerClassicCLI`、当前用户的 PATH 和 Fiddler 桥接。即使本地构建报告的版本号相同，也会替换已安装的 CLI。替换已加载的桥接前，请先保存需要的捕获记录并正常关闭 Fiddler。更新可执行文件前，也请停止正在使用它的守护进程或 MCP 服务器。安装后需手动启动这些组件。
+
+该脚本将 `-InstallDirectory`、`-NoPathUpdate`、`-SkipBridge` 和 `-Json` 传给 `scripts/install.ps1`。如需保留常用的 CLI 安装、PATH 和桥接，可安装到独立目录：
+
+```powershell
+./scripts/install-local.ps1 -InstallDirectory "$env:LOCALAPPDATA/Programs/FiddlerClassicCLI-Dev" -NoPathUpdate -SkipBridge
+```
+
+直接使用该目录中的可执行文件即可。省略 `-SkipBridge` 会部署开发构建的桥接，并将 Fiddler 的主程序启动记录指向开发构建的可执行文件。`-Json` 返回与 `scripts/install.ps1` 相同的结构化安装结果，失败时返回非零退出码。
+
+## 使用独立可执行文件
+
+发布版本仅提供 `fiddler-classic-cli.exe`，不附带 ZIP 或独立校验文件。使用引导脚本可自动下载并验证。手动下载 EXE 时，请先将其 SHA-256 与 GitHub 返回的文件摘要比较，确认一致后再运行。文档和 Agent Skill 文件保留在源码仓库中。
+
+将已验证的可执行文件放在固定目录中，然后部署其嵌入的桥接：
+
+```powershell
+./fiddler-classic-cli.exe bridge install
+```
+
+`bridge install` 部署扩展并记录当前可执行文件的路径，CLI 保留在原处，`PATH` 保持不变。请保留该路径上的可执行文件，供 Fiddler 启动守护进程。如需将本地可执行文件复制到固定安装目录并更新 `PATH`，请按上文示例使用 `scripts/install.ps1`，通过 `-PackagePath` 指定来源。
+
+PowerShell 安装脚本和 `bridge install` 均不会启动 Fiddler、守护进程或 MCP 服务器，也不会配置 Agent Skills。如需使用 Skill，请从源码仓库获取 `skills/fiddler-classic-cli` 并另行设置。
+
+## 安装错误
+
+CLI 文件事务失败时，安装程序会回滚该事务。如果 CLI 文件提交后桥接安装失败，已验证的 CLI 会保留，脚本返回非零退出码。桥接文件可能已发生更改。请先保存需要的捕获记录并正常关闭 Fiddler，再使用已安装的可执行文件重试 `fiddler-classic-cli bridge install`。
 
 ## Fiddler 桥接
 
-安装 CLI 后，再安装扩展文件：
+默认安装会将嵌入的 `FiddlerClassicCLI.Bridge.dll` 和 `FiddlerClassicCLI.Protocol.dll` 提取到 `%USERPROFILE%\Documents\Fiddler2\Scripts`，并在 `%LOCALAPPDATA%\FiddlerClassicCLI\bridge-host.json` 中写入已安装主程序的路径和版本。该启动记录仅限当前用户访问，供扩展在 Fiddler 随后加载时查找主程序。
+
+如果使用了 `scripts/install.ps1 -SkipBridge`，或需要修复桥接，可运行：
 
 ```powershell
 & $cliPath bridge install
 ```
 
-重启 Fiddler Classic 以加载扩展，然后验证所有组件：
+首次安装桥接后启动 Fiddler，可能会为 `FiddlerClassicCLI.Bridge.dll` 和 `FiddlerClassicCLI.Protocol.dll` 分别弹出标题为 "Caution: Unverified Extension Detected" 的扩展授权窗口。每个窗口都要求确认是否允许加载 Fiddler Scripts 目录中的对应 DLL。
+
+请检查每个窗口显示的完整路径和文件名，仅在信任已安装文件时选择 `Allow`。如果还希望 Fiddler 记住此次授权，可选择 `Always allow`。文件或来源不明时，请选择 `Do not allow`，核实安装来源后再继续。两个提示都需要在 Fiddler 中手动处理。安装脚本和 CLI 会将这些信任决定留给用户，等待授权或拒绝加载期间，桥接可能无法连接。
+
+显式启动或重启 Fiddler Classic，并处理扩展提示后，验证连接：
 
 ```powershell
 & $cliPath doctor
 & $cliPath status --json
 ```
 
-`bridge install` 会将 `FiddlerClassic.Bridge.dll` 和 `FiddlerClassic.Protocol.dll` 复制到 `%USERPROFILE%\Documents\Fiddler2\Scripts`。该命令还会以原子方式写入 `%LOCALAPPDATA%\FiddlerClassicCLI\bridge-host.json`，准确记录已安装主程序的可执行文件和版本，供扩展启动或查找守护进程。此文件仅允许当前用户访问；`bridge uninstall` 会删除该文件。
+**Fiddler Classic CLI** 标签页及其 Tools 菜单快捷入口管理 MCP HTTP 访问，与 Fiddler 抓包代理分别配置。桥接安装不会安装 Fiddler，也不会更改系统代理、证书或 HTTPS 解密设置。`bridge uninstall` 在确认后删除扩展文件和启动记录。
 
-重启 Fiddler 后，主标签栏中会显示 **Fiddler Classic CLI** 标签页，Tools 菜单中的快捷入口可选中该标签页。该标签页管理 MCP HTTP 访问，不会改变 Fiddler 的抓包代理。安装桥接扩展不会安装 Fiddler，也不会改变系统代理或配置证书信任。
+**MCP HTTP service** 中的状态灯在监听时显示绿色，停止或禁用时显示红色，尚未检查状态或检查失败时显示灰色。旁边的文字说明具体状态。带剪贴板图标的复制按钮紧邻各个回环或局域网 URL。面板变窄时，较长的 URL 会自动换行。空间不足时，复制按钮只显示图标，仍保留鼠标悬停提示和键盘快捷键。绑定下拉框按 Windows 实际渲染的字体调整宽度，完整显示选项。
 
-运行 `& $cliPath app detect --json` 可查找 Fiddler；自定义安装可加上 `--path "C:/Tools/Fiddler/Fiddler.exe"`。Fiddler 已关闭时，`& $cliPath app open` 会启动它，但不挂接系统代理。如需从 CLI 重启，请先保存需要的捕获记录，再运行 `& $cliPath app restart --yes`。原生对话框仍可能需要手动处理。进程选择和超时行为见[应用程序命令](cli.md#fiddler-应用程序)。
+运行 `& $cliPath app detect --json` 可查找 Fiddler，自定义安装可加上 `--path "C:/Tools/Fiddler/Fiddler.exe"`。Fiddler 已关闭时，`& $cliPath app open` 使用 `-noattach` 启动它。如需从 CLI 重启，请先保存需要的捕获记录，再运行 `& $cliPath app restart --yes`。原生对话框可能需要手动处理。进程选择和超时说明见[应用程序命令](cli.md#fiddler-应用程序)。
+
+### 命名管道
+
+标签页中的只读 **Named pipes** 区域位于 **Versions** 附近，与 MCP HTTP 控件分开。它以 `\\.\pipe\<name>` 格式显示桥接和守护进程的完整管道路径，各有独立的复制按钮。区域内还列出支持的桥接协议（v3）、守护进程协议（v1）和访问限制 **Current Windows user only**。Windows ACL 将访问权限限制为当前用户。
+
+桥接状态反映本地监听器的实际生命周期：`Stopped`、`Starting`、`Listening`、`Retrying` 或 `Unavailable`。无法监听时，请查看显示的最近一次监听器错误。守护进程状态检查成功后显示 `Responding`、PID 和 UTC 启动时间（`StartedAtUtc`）。检查超时或无法获取响应时，守护进程状态仍不确定，PID 和启动时间会清除为 `Unknown`。仅凭检查失败无法判定守护进程已停止。可用 `doctor` 检查主程序安装，再重试状态检查。
+
+状态每两秒刷新一次，请求不会重叠。**Refresh pipes** 仅读取本地桥接快照和守护进程状态，不会启动守护进程或配置监听器。扩展仍会在初始化时启动或发现守护进程，此过程独立于该按钮和标签页选择。该区域不显示凭据、令牌或流量内容，也不记录管道连接数量或历史。
 
 ## 构建与打包
 
@@ -83,7 +156,7 @@ $cliPath = (& $installerPath -PackagePath $trustedPackagePath | Select-Object -L
 ./scripts/build.ps1
 ```
 
-使用以下命令创建发布 ZIP 和校验清单：
+使用以下命令创建发布可执行文件：
 
 ```powershell
 ./scripts/package.ps1
@@ -95,9 +168,9 @@ $cliPath = (& $installerPath -PackagePath $trustedPackagePath | Select-Object -L
 ./scripts/package.ps1 -Version "0.3.0-preview.1"
 ```
 
-打包脚本将发布文件写入 `artifacts/release`。归档验证会拒绝 `Fiddler.exe`，不论其目录层级或文件名大小写。验证也会拒绝不安全的 Windows 路径、重复路径、符号链接以及文件与目录冲突。归档必须包含根目录安装脚本和全部五个 Skill 参考文件，且 Skill 内不得包含脚本。普通构建会在发布前清理固定的发布目录；`-SkipBuild` 直接打包现有目录。
+普通构建会在发布前清理 `artifacts/publish/win-x64`，最终仅在其中保留 `fiddler-classic-cli.exe`。打包脚本验证该输出，清理生成的 `artifacts/release` 目录，再仅复制可执行文件。`-SkipBuild` 验证并复制现有发布输出，不重新构建。编译中间文件和测试文件存放在这两个输出目录之外。
 
-运行 `./scripts/test-release-verifier.ps1` 可测试归档拒绝规则。`./scripts/test-release-install.ps1 -FixtureOnly` 使用仅报告版本、不执行其他操作的测试程序，安全验证首次安装、同版本重装和并存升级。测试会校验已安装文件的哈希，确认旧版本不变，并检查 `-NoPathUpdate` 是否保持两个 PATH 值不变。CI 使用实际发布 ZIP 执行同一组安装测试。
+发布验证要求目录中只有一个名称正确的 Windows x64 PE 可执行文件。验证会拒绝额外文件或目录、重解析点以及无效的可执行文件头，并在提供预期摘要时检查 SHA-256。`./scripts/test-release-verifier.ps1` 检查这些拒绝规则，`./scripts/test-single-file.ps1` 检查独立运行和嵌入资源，`./scripts/test-release-install.ps1` 在临时位置检查安装行为。这些检查必须保留用户已有的 CLI、桥接和环境设置。
 
 ## GitHub Actions
 
@@ -108,17 +181,17 @@ $cliPath = (& $installerPath -PackagePath $trustedPackagePath | Select-Object -L
 1. 安装 `global.json` 选定的 SDK。
 2. 通过 WinGet 安装 `Telerik.Fiddler.Classic` `6.0.20261.7291`。如果 WinGet 不可用，或安装的 `Fiddler.exe` 版本不完全一致，任务会改用固定版本的 Chocolatey 包。
 3. 在编译前验证 `%LOCALAPPDATA%\Programs\Fiddler` 中的 `Fiddler.exe`。
-4. 运行 `scripts/package.ps1`，执行全部自动化测试、发布自包含主程序、创建 ZIP 和校验清单，并验证归档内容约定。
-5. 测试归档拒绝规则，并执行临时安装、重装和升级检查，然后记录发布桥接 DLL 的 SHA-256。
-6. 将 `fiddler-classic-win-x64.zip` 和 `SHA256SUMS` 上传为保留 14 天的工作流产物。
+4. 运行 `scripts/package.ps1`，测试解决方案、发布自包含主程序，并验证发布输出目录和 Release 目录各自仅包含 `fiddler-classic-cli.exe`。
+5. 测试发布拒绝规则和独立运行，并在临时位置检查安装、重装和升级。将可执行文件及其嵌入桥接的 SHA-256 记录为任务输出。
+6. 仅上传 `fiddler-classic-cli.exe`，作为保留 14 天的工作流产物。摘要通过工作流元数据传递给后续任务。
 
 构建任务会在拉取请求、推送到 `main`、匹配 `v*` 的标签和手动触发时运行。其令牌只有仓库只读权限。
 
-版本标签触发的发布任务会下载同一次构建产生的产物，并使用具有 `contents: write` 权限的工作流 `GITHUB_TOKEN` 运行 `scripts/publish-release.ps1`。脚本会先验证发布包，再访问 GitHub。Release 已存在时，脚本保留其标题、说明、草稿状态和预发布设置，只上传缺失的文件；尚不存在时，脚本会确认标签已经存在，再创建 Release。稳定标签使用 `v0.3.0` 格式；带有后缀的标签（如 `v0.3.0-preview.1`）会将新建的 Release 标记为预发布版本。
+版本标签触发的发布任务会下载同一次构建产生的可执行文件，并使用具有 `contents: write` 权限的工作流 `GITHUB_TOKEN` 运行 `scripts/publish-release.ps1`。脚本会先验证单文件输出及其预期 SHA-256，再访问 GitHub，且仅上传 `fiddler-classic-cli.exe`。Release 已存在时，脚本保留其标题、说明、草稿状态和预发布设置。尚不存在时，脚本会确认标签已经存在，再创建 Release。稳定标签使用 `v0.3.0` 格式。带有后缀的标签（如 `v0.3.0-preview.1`）会将新建的 Release 标记为预发布版本。
 
-重新运行时，已有文件必须处于已上传状态，且 SHA-256 摘要与本地文件一致。文件不一致或缺少可验证的摘要时，脚本会在上传前停止。脚本不会替换已有文件；不可变的 Release 必须已经包含两个匹配的文件。身份验证或连接失败也会中止发布。`scripts/test-release-publication.ps1` 使用模拟的 GitHub CLI 和本地发布包，在工作流的两个平台上检查这些处理分支，不会向 GitHub 发送请求。
+重新运行时，已有的 `fiddler-classic-cli.exe` 必须处于已上传状态，且 SHA-256 摘要与本地文件一致。文件不一致或缺少可验证的摘要时，脚本会停止。脚本不会替换已有文件，不可变的 Release 必须已经包含匹配的可执行文件。身份验证或连接失败也会中止发布。`scripts/test-release-publication.ps1` 使用模拟的 GitHub CLI 和本地可执行文件测试样本，在工作流的两个平台上检查这些处理分支，不会向 GitHub 发送请求。
 
-每次工作流都会针对 `5.0.20253.3311` 和 `6.0.20261.7291` 执行仅检查元数据的兼容性矩阵。各运行器下载同一个发布 ZIP，校验桥接哈希，并在不执行 Fiddler 代码的情况下解析直接 API 引用。两个矩阵任务均通过后才能发布 Release。此检查不验证原生绑定策略、按名称反射的行为或 UI 正确性。
+每次工作流都会针对 `5.0.20253.3311` 和 `6.0.20261.7291` 执行仅检查元数据的兼容性矩阵。各运行器下载同一个发布 EXE，先验证其 SHA-256，再将嵌入的桥接提取到测试目录。随后校验桥接哈希，并在不执行 Fiddler 代码的情况下解析直接 API 引用。两个矩阵任务均通过后才能发布 Release。此检查不验证原生绑定策略、按名称反射的行为或 UI 正确性。
 
 手动工作流包含 `run_fiddler_compatibility` 选项。启用后，矩阵还会启动原生 Fiddler，执行生命周期和证据检查。矩阵针对每个引用仅编译检查程序和测试探针，不会重新构建生产桥接或协议 DLL。
 

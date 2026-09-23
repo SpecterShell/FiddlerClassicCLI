@@ -9,22 +9,22 @@ extension.
 - Support Windows x64 and Fiddler Classic 5.x and 6.x. Do not introduce claims of support
   for Fiddler Everywhere, Fiddler Classic 4.x, or non-Windows capture engines.
 - Keep Fiddler Classic as the capture and traffic-mutation engine. The extension is
-  a thin automation bridge; the host provides CLI, MCP, daemon, validation, and
+  a thin automation bridge. The host provides CLI, MCP, daemon, validation, and
   serialization behavior.
 - Do not launch Fiddler automatically, install a service or MSI, or install,
   generate, or trust certificates.
 - Only explicit `app open` or `app restart` commands may launch Fiddler, using
   `-noattach`. Close and restart require confirmation and normal window shutdown.
-  Verify the process owner and Windows session; never force-kill or dismiss native dialogs.
+  Verify the process owner and Windows session. Never force-kill or dismiss native dialogs.
 - Do not redistribute `Fiddler.exe` or any Telerik binaries.
 - The code, tests, public docs, and this guide define the current implementation.
 
 ## Architecture Boundaries
 
-### `FiddlerClassic.Protocol`
+### `FiddlerClassicCLI.Protocol`
 
 - Keep this project free of Fiddler references and host-specific dependencies.
-- It targets both `net462` and `net10.0`; changes must compile on both targets.
+- It targets both `net462` and `net10.0`. Changes must compile on both targets.
 - Put versioned wire DTOs, operation names, error codes, framing, pipe names, and
   shared input validation here.
 - Use length-prefixed JSON frames and enforce frame-size limits before allocating
@@ -32,7 +32,7 @@ extension.
 - Never put live Fiddler objects, framework-specific exceptions, streams, or
   unbounded payloads in protocol DTOs.
 
-### `FiddlerClassic.Bridge`
+### `FiddlerClassicCLI.Bridge`
 
 - Keep the bridge on `net462` and compatible with the installed Fiddler Classic
   5.x and 6.x extension model.
@@ -51,11 +51,11 @@ extension.
   actionable stable error when the expected member is unavailable, and cover its
   behavior with an opt-in integration test.
 
-### `FiddlerClassic.Host`
+### `FiddlerClassicCLI.Host`
 
 - Keep the host on `net10.0`. It owns the executable, CLI, daemon, MCP transports,
   installation, configuration, authentication, and host-side export logic.
-- Access Fiddler traffic and automation APIs only through `IBridgeClient`; do not
+- Access Fiddler traffic and automation APIs only through `IBridgeClient`. Do not
   add Fiddler assembly references to the host. Explicit application lifecycle
   commands use Windows process APIs and must remain independent of bridge IPC.
 - Reuse shared client and service behavior across CLI and MCP surfaces. Avoid two
@@ -79,7 +79,7 @@ extension.
   AutoResponder evaluation order, hand-tamper states, and actual session removal
   counts.
 - Treat replay and composition as queued Fiddler operations. Optional result
-  correlation is host orchestration, not a native transaction handle.
+  correlation uses host orchestration. Fiddler provides no native transaction handle.
 - When changing behavior based on Fiddler objects, compare it with the equivalent
   Fiddler UI operation and add a live compatibility test where practical.
 
@@ -91,9 +91,9 @@ extension.
   remove superseded aliases, fields, commands, and migration text in the same
   change.
 - Increment the bridge or daemon protocol version when peers can no longer safely
-  understand one another. Return `protocol_mismatch` instead of guessing.
+  understand one another. Return `protocol_mismatch` when protocol versions are incompatible.
 - Use stable error codes from `ErrorCodes`. Map expected failures to documented CLI
-  exit codes and structured MCP errors; do not expose implementation exceptions as
+  exit codes and structured MCP errors. Do not expose implementation exceptions as
   contracts.
 - Validate unsupported URLs, malformed headers, CRLF injection, missing sessions,
   invalid offsets, count limits, oversized frames, and path constraints before an
@@ -104,7 +104,7 @@ extension.
   KiB per call and report offset, bytes returned, total length, EOF, content type,
   and text/base64 encoding metadata.
 - CLI body and WebSocket output must stream exact bytes in chunks to an explicit
-  path or `-`; do not embed complete bodies in routine JSON metadata.
+  path or `-`. Do not embed complete bodies in routine JSON metadata.
 
 ## Security and Evidence Integrity
 
@@ -118,18 +118,28 @@ extension.
   `0.0.0.0` only after explicit plaintext-credential confirmation. Require bearer
   authentication and do not enable CORS or configure TLS or firewall rules.
 - Keep destructive operations explicitly confirmed. Non-interactive CLI callers
-  use `--yes`; MCP callers use the corresponding confirmation argument.
+  use `--yes`. MCP callers use the corresponding confirmation argument.
 - Mark MCP tools accurately as read-only, destructive, idempotent, and open-world.
   Add or update annotation tests whenever a tool changes.
 - Validate archive and rule-set paths as absolute `.saz` or `.farx` paths. Reject
   existing destinations unless overwrite and confirmation requirements are met.
-- `capture start` and `capture stop` may only attach or detach Fiddler as the system
-  proxy. Preserve certificate and HTTPS-decryption settings.
+- `capture start` and `capture stop` may only attach or detach Fiddler as the host
+  Windows system proxy. Preserve certificate and HTTPS-decryption settings.
+  Explicitly routed traffic can still reach a running Fiddler proxy listener in
+  either attachment state through loopback or a reachable interface configured
+  for remote access. An IPv4 `0.0.0.0` binding listens on all IPv4 interfaces.
+  Clients use a concrete host address and proxy port, subject to routing and
+  firewall rules. Keep Fiddler proxy binding separate from MCP HTTP binding.
 
 ## CLI and MCP Contracts
 
 - Keep human-readable CLI output useful, and provide stable `--json` or JSONL
   output where documented for automation.
+- Bare CLI and command groups show their own help on stdout and exit 0, as with
+  `--help`. Missing required inputs and other parser errors show command help and
+  errors on stderr and exit 2 without actions. With `--json`, write only the
+  structured error to stderr. Keep stdout empty on parser errors, including with
+  `--output -`.
 - Reserve stdout for the declared data stream. `mcp stdio` writes JSON-RPC only to
   stdout, and `--output -` writes payload bytes only to stdout. Send diagnostics
   and progress to stderr in both cases.
@@ -219,10 +229,19 @@ dotnet test ./FiddlerClassicCLI.slnx
 
 - `scripts/build.ps1` is the normal release verification path: it tests the
   solution and publishes the self-contained `win-x64` host.
-- A release package must contain the host, bridge and protocol artifacts, docs,
-  license, install script, and Agent Skill, but never `Fiddler.exe`.
-- Keep release archives reproducible enough to verify through `SHA256SUMS` and
-  `scripts/verify-release.ps1`.
+- Publish only `fiddler-classic-cli.exe`, with its runtime, bridge
+  assemblies, and `LICENSE` embedded. Both `artifacts/publish/win-x64` and
+  `artifacts/release` must contain only this executable.
+- `scripts/install.ps1` downloads the exact EXE asset from the latest GitHub release
+  by default and requires verification against GitHub's SHA-256 asset digest.
+  It uses a fixed current-user directory and installs the bridge by default.
+  Keep `bridge install` available for standalone bridge deployment.
+  Preserve unrelated files, support rollback, and leave skill setup to the user.
+- Keep documentation and Agent Skills in the source repository. Release assets
+  must exclude `Fiddler.exe` and contain no ZIP, checksum manifest, or sidecar files.
+- Verify the single-file output with `scripts/verify-release.ps1`. Pass executable
+  and embedded-bridge SHA-256 values between CI jobs as metadata. Compatibility
+  checks must use the bridge extracted from the verified release EXE.
 - GitHub Actions builds on `windows-2025`. Install the Fiddler compile reference
   with WinGet first and Chocolatey only as the fallback.
 - Pin third-party GitHub Actions to full commit SHAs.

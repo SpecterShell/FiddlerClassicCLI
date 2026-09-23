@@ -4,7 +4,7 @@ These commands change Fiddler state, create sensitive files, or generate traffic
 
 ## `sessions clear`
 
-Permanently remove every captured session, but only when the user requests it. Usage: `& $cliPath sessions clear [--yes] [--json]`. Prefer selective removal when IDs are known. Example: `& $cliPath sessions clear --yes --json`.
+Permanently remove every captured session only when the user requests it. Usage: `& $cliPath sessions clear [--yes] [--json]`. Prefer selective removal when IDs are known. Example: `& $cliPath sessions clear --yes --json`.
 
 ## `sessions remove`
 
@@ -20,12 +20,12 @@ Load sessions from an existing SAZ archive into Fiddler. Usage: `& $cliPath sess
 
 ## `sessions replay`
 
-Queue a captured session for replay through Fiddler. Usage: `& $cliPath sessions replay <session-id> [--unconditional] [--wait] [--timeout 1..60] [--json]`. `--unconditional` removes conditional request headers; a wait timeout does not cancel an accepted replay. Example: `& $cliPath sessions replay 42 --wait --timeout 30 --json`.
+Queue a captured session for replay through Fiddler. Usage: `& $cliPath sessions replay <session-id> [--unconditional] [--wait] [--timeout 1..60] [--json]`. `--unconditional` removes conditional request headers. A wait timeout does not cancel an accepted replay. Example: `& $cliPath sessions replay 42 --wait --timeout 30 --json`.
 
 ## `sessions export`
 
-Export one request as cURL or raw HTTP, or a filtered set of sessions as HAR. Usage: `& $cliPath sessions export [session-id] --format curl|raw-http|har --output <path|-> [filters] [--overwrite] [--yes]`. cURL and raw HTTP require an ID; HAR omits it. Example: `& $cliPath sessions export --format har --host example.test --output "C:/Captures/example.har"`.
+Export one request as cURL or raw HTTP, or a filtered set of sessions as HAR. Usage: `& $cliPath sessions export [session-id] --format curl|raw-http|har --output <path|-> [filters] [--overwrite] [--yes]`. cURL and raw HTTP require an ID. HAR omits it. Example: `& $cliPath sessions export --format har --host example.test --output "C:/Captures/example.har"`.
 
 ## `request send`
 
-Compose and send an HTTP or HTTPS request through Fiddler. Usage: `& $cliPath request send <url> [-X METHOD] [-H "Name: value"] [--body text|--body-file path] [--wait] [--timeout 1..60] [--json]`. Repeat `-H` for ordered headers; body files are capped at 4 MiB. Example: `& $cliPath request send "https://example.test/api" -X POST -H "Content-Type: application/json" --body '{}' --wait --json`.
+Compose and send an HTTP or HTTPS request through Fiddler. Usage: `& $cliPath request send <url> [-X METHOD] [-H "Name: value"] [--body text|--body-file path] [--wait] [--timeout 1..60] [--json]`. Repeat `-H` for ordered headers. Body files are capped at 4 MiB. Example: `& $cliPath request send "https://example.test/api" -X POST -H "Content-Type: application/json" --body '{}' --wait --json`.

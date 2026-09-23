@@ -6,9 +6,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$artifactsDirectory = [System.IO.Path]::GetFullPath((Join-Path $repositoryRoot "artifacts"))
-$publishDirectory = [System.IO.Path]::GetFullPath((Join-Path $artifactsDirectory "publish/win-x64"))
-$artifactsPrefix = $artifactsDirectory.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+$publishDirectory = Join-Path $repositoryRoot 'artifacts/publish/win-x64'
 $commonArguments = @(
     "--configuration", $Configuration,
     "-p:FiddlerInstallDir=$FiddlerInstallDir"
@@ -22,21 +20,13 @@ if ($LASTEXITCODE -ne 0) {
     throw "dotnet test failed with exit code $LASTEXITCODE."
 }
 
-$publishIsInsideArtifacts = $publishDirectory.StartsWith(
-    $artifactsPrefix,
-    [System.StringComparison]::OrdinalIgnoreCase)
-if (-not $publishIsInsideArtifacts) {
-    throw "Refusing to clean publish directory outside '$artifactsDirectory'."
-}
-
-if (Test-Path -LiteralPath $publishDirectory) {
-    Remove-Item -LiteralPath $publishDirectory -Recurse -Force
-}
+& "$PSScriptRoot/reset-artifact-directory.ps1" -Directory 'publish/win-x64'
 
 $publishArguments = @($commonArguments) + @("-p:PublishProfile=win-x64")
-& dotnet publish "$repositoryRoot/src/FiddlerClassic.Host/FiddlerClassic.Host.csproj" @publishArguments
+& dotnet publish "$repositoryRoot/src/FiddlerClassicCLI.Host/FiddlerClassicCLI.Host.csproj" @publishArguments
 if ($LASTEXITCODE -ne 0) {
     throw "dotnet publish failed with exit code $LASTEXITCODE. Stop a daemon running from the publish directory and retry."
 }
 
-Write-Host "Published to $repositoryRoot/artifacts/publish/win-x64"
+& "$PSScriptRoot/verify-release.ps1" -ReleaseDirectory $publishDirectory
+Write-Host "Published to $publishDirectory"

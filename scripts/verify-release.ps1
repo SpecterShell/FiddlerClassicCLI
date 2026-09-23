@@ -1,111 +1,61 @@
 <#
 .SYNOPSIS
-Verifies a packaged Fiddler Classic CLI release before artifact upload or publication.
+Verifies the sole Windows x64 executable before artifact upload or publication.
 
 .PARAMETER ReleaseDirectory
-The directory containing fiddler-classic-win-x64.zip and SHA256SUMS.
+The directory containing only fiddler-classic-cli.exe.
+
+.PARAMETER ExpectedSha256
+The trusted build digest, required by callers that download or publish an artifact.
 #>
 [CmdletBinding()]
 param(
-    [string]$ReleaseDirectory = "$PSScriptRoot/../artifacts/release"
+    [string]$ReleaseDirectory = "$PSScriptRoot/../artifacts/release",
+    [ValidatePattern('\A[A-Fa-f0-9]{64}\z')]
+    [string]$ExpectedSha256
 )
 
-$ErrorActionPreference = "Stop"
-$resolvedReleaseDirectory = (Resolve-Path -LiteralPath $ReleaseDirectory).Path
-$assetName = "fiddler-classic-win-x64.zip"
-$assetPath = Join-Path $resolvedReleaseDirectory $assetName
-$checksumPath = Join-Path $resolvedReleaseDirectory "SHA256SUMS"
-
-if (-not (Test-Path -LiteralPath $assetPath -PathType Leaf)) {
-    throw "Release asset '$assetName' was not found in '$resolvedReleaseDirectory'."
+$ErrorActionPreference = 'Stop'
+$directory = Get-Item -LiteralPath $ReleaseDirectory -Force
+if (-not $directory.PSIsContainer -or
+    ($directory.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+    throw 'The release directory must be a regular directory.'
+}
+$entries = @(Get-ChildItem -LiteralPath $directory.FullName -Force)
+if ($entries.Count -ne 1 -or $entries[0].Name -cne 'fiddler-classic-cli.exe' -or
+    $entries[0].PSIsContainer -or ($entries[0].Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+    throw 'The release directory must contain only fiddler-classic-cli.exe, with no links or additional files.'
 }
 
-if (-not (Test-Path -LiteralPath $checksumPath -PathType Leaf)) {
-    throw "Release checksum manifest was not found in '$resolvedReleaseDirectory'."
-}
-
-$manifestLines = @(Get-Content -LiteralPath $checksumPath | Where-Object { $_.Trim() })
-if ($manifestLines.Count -ne 1 -or
-    $manifestLines[0] -notmatch "^([A-Fa-f0-9]{64})\s+\*?(.+)$" -or
-    $matches[2].Trim() -ne $assetName) {
-    throw "SHA256SUMS must contain one exact entry for '$assetName'."
-}
-
-$expectedHash = $matches[1].ToLowerInvariant()
-$actualHash = (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
-if ($actualHash -ne $expectedHash) {
-    throw "SHA-256 verification failed for '$assetName'."
-}
-
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-$archive = [System.IO.Compression.ZipFile]::OpenRead($assetPath)
+# Check bounded PE headers on every verifier platform, including the Linux release job.
+$executable = $entries[0]
+$stream = [IO.File]::OpenRead($executable.FullName)
+$reader = [IO.BinaryReader]::new($stream)
 try {
-    # Apply Windows path rules on every verifier platform, including the Linux release job.
-    $entryNames = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    $fileNames = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($entry in $archive.Entries) {
-        $name = $entry.FullName.Replace('\', '/')
-        $parts = $name.TrimEnd('/').Split('/')
-        if ($parts -icontains 'Fiddler.exe') {
-            throw "Release archive must not redistribute Fiddler.exe."
-        }
-
-        if ([string]::IsNullOrWhiteSpace($name) -or $name.StartsWith('/') -or
-            $name -match '[\x00-\x1f\x7f<>:"|?*]' -or
-            @($parts | Where-Object {
-                    $_ -in @('', '.', '..') -or $_ -match '[. ]$' -or
-                    $_ -match '^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)'
-                }).Count -ne 0) {
-            throw "Release archive contains an unsafe Windows path."
-        }
-
-        # Symlinks are not release payloads; extraction behavior differs across platforms.
-        if ((($entry.ExternalAttributes -shr 16) -band 0xF000) -eq 0xA000) {
-            throw "Release archive must not contain symbolic links."
-        }
-        if (-not $entryNames.Add($name.TrimEnd('/'))) {
-            throw "Release archive contains duplicate Windows paths."
-        }
-        if (-not $name.EndsWith('/')) { $null = $fileNames.Add($name) }
+    if ($stream.Length -lt 154 -or $reader.ReadUInt16() -ne 0x5A4D) {
+        throw 'The release executable is not a Windows x64 PE file.'
     }
-    foreach ($name in $entryNames) {
-        $parent = $name
-        while ($parent.Contains('/')) {
-            $parent = $parent.Substring(0, $parent.LastIndexOf('/'))
-            if ($fileNames.Contains($parent)) {
-                throw "Release archive contains a file/directory path collision."
-            }
-        }
+    $stream.Position = 0x3C
+    $headerOffset = $reader.ReadInt32()
+    if ($headerOffset -lt 64 -or $headerOffset -gt ($stream.Length - 26)) {
+        throw 'The release executable has an invalid PE header offset.'
     }
-    $requiredEntries = @(
-        "fiddler-classic.exe",
-        "LICENSE",
-        "install.ps1",
-        "bridge/FiddlerClassic.Bridge.dll",
-        "bridge/FiddlerClassic.Protocol.dll",
-        "skills/fiddler-classic-cli/SKILL.md",
-        "skills/fiddler-classic-cli/references/diagnostics-and-runtime.md",
-        "skills/fiddler-classic-cli/references/capture-and-inspection.md",
-        "skills/fiddler-classic-cli/references/session-actions.md",
-        "skills/fiddler-classic-cli/references/autoresponder.md",
-        "skills/fiddler-classic-cli/references/breakpoints.md",
-        "docs/en-US/installation.md",
-        "docs/zh-CN/installation.md"
-    )
-
-    foreach ($requiredEntry in $requiredEntries) {
-        if (-not $fileNames.Contains($requiredEntry)) {
-            throw "Release archive is missing '$requiredEntry'."
-        }
+    $stream.Position = $headerOffset
+    if ($reader.ReadUInt32() -ne 0x00004550 -or $reader.ReadUInt16() -ne 0x8664) {
+        throw 'The release executable is not a Windows x64 PE file.'
     }
-
-    $nestedSkillScripts = @($entryNames | Where-Object { $_ -like "skills/fiddler-classic-cli/scripts/*" })
-    if ($nestedSkillScripts.Count -ne 0) {
-        throw "Release archive must not contain scripts inside the Fiddler Classic CLI skill."
+    $stream.Position = $headerOffset + 24
+    if ($reader.ReadUInt16() -ne 0x20B) {
+        throw 'The release executable is not a Windows x64 PE file.'
     }
 }
 finally {
-    $archive.Dispose()
+    $reader.Dispose()
+    $stream.Dispose()
 }
 
-Write-Host "Verified $assetName ($actualHash)."
+$hash = (Get-FileHash -LiteralPath $executable.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($ExpectedSha256 -and $hash -ne $ExpectedSha256) {
+    throw "SHA-256 verification failed for '$($executable.Name)'."
+}
+Write-Host "Verified $($executable.Name) (SHA-256: $hash)."

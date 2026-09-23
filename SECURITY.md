@@ -8,7 +8,7 @@ Fiddler sessions may contain credentials, cookies, tokens, private request bodie
 
 MCP HTTP is disabled and binds only to loopback by default. Binding the managed listener to IPv4 `0.0.0.0` requires explicit confirmation of a warning. Remote mode uses plain HTTP, so anyone who observes a bearer credential can reuse it. Restrict access along the network path and prefer loopback when remote access is unnecessary.
 
-Session summaries omit headers and bodies but retain hostnames and activity counts. Treat them as sensitive metadata. `doctor --output` writes a diagnostic report limited to numeric versions, known capabilities, listener state, and fixed errors. The report excludes traffic, credentials, client identities, LAN addresses, local paths, and raw exception text. Review reports before sharing them publicly.
+Session summaries include hostnames and activity counts. They omit headers and bodies. Treat them as sensitive metadata. `doctor --output` writes a diagnostic report limited to numeric versions, known capabilities, listener state, and fixed errors. The report excludes traffic, credentials, client identities, LAN addresses, local paths, and raw exception text. Review reports before sharing them publicly.
 
 ## Local trust boundary
 
@@ -16,16 +16,24 @@ Session summaries omit headers and bodies but retain hostnames and activity coun
 - The CLI daemon named pipe uses the runtime's current-user-only pipe restriction.
 - Access to HTTP configuration and the default token retained for compatibility is restricted to the current Windows user. Named client tokens are stored only as SHA-256 hashes.
 - Every HTTP request requires a bearer credential. Both HTTP modes reject requests containing an `Origin` header with HTTP 403, including requests with valid credentials. No browser origins are authorized. The server does not enable CORS or configure TLS, certificates, or Windows Firewall.
-- Bridge installation writes extension assemblies to the current user's Fiddler Scripts directory and records how to launch the host in the current user's local application data.
+- `scripts/install.ps1` writes to `%LOCALAPPDATA%\Programs\FiddlerClassicCLI` by default, updates the current-user `PATH`, deploys embedded bridge assemblies to the user's Fiddler Scripts directory, and records the installed host path. `-NoPathUpdate` and `-SkipBridge` omit the corresponding changes.
 - Fiddler Classic and its extension run with the privileges of the interactive user.
+
+The bootstrap downloads `fiddler-classic-cli.exe` from the selected GitHub repository and requires a valid SHA-256 asset digest from GitHub. It verifies the downloaded bytes before execution and stops if the digest is missing or does not match. This check depends on the selected repository and GitHub metadata being trusted. Explicit local EXEs and directories are trusted inputs. Explicit local ZIPs require an adjacent `SHA256SUMS` with a matching entry for the exact filename. Run scripts and releases only from sources you trust. Updates replace the CLI at its fixed path and deploy the bridge unless skipped. Installation does not start Fiddler, the daemon, or MCP servers, install Agent Skills, or change certificate trust and HTTPS decryption.
 
 Any process already running as the same Windows user can normally access that user's files and local IPC endpoints. The bridge provides no sandbox protection against malware running as that user.
 
 The CLI daemon relays the versioned bridge protocol and can run the managed MCP HTTP listener. It tracks only connection metadata needed for operation and never retains request URLs, headers, tokens, bodies, or captured traffic. It does not launch Fiddler, modify proxy settings on startup, or install certificates.
 
-Foreground and managed HTTP listeners reload default and named credentials after configuration changes. Revoked credentials fail subsequent authentication. Deauthorization aborts associated connections in the daemon-managed listener; it cannot undo operations already dispatched or abort foreground connections. Administrative commands cannot fall back to offline operation when the daemon is unresponsive.
+Foreground and managed HTTP listeners reload default and named credentials after configuration changes. Revoked credentials fail subsequent authentication. Deauthorization aborts associated connections in the daemon-managed listener. It cannot undo operations already dispatched or abort foreground connections. Administrative commands cannot fall back to offline operation when the daemon is unresponsive.
 
-MCP client metadata, including `clientInfo` and capabilities, is untrusted protocol data. It does not grant authorization or replace bearer authentication. Modern HTTP requests require matching protocol and method headers, plus a matching tool-name header for tool calls; the SDK rejects inconsistent values before dispatch.
+MCP client metadata, including `clientInfo` and capabilities, is untrusted protocol data. It does not grant authorization or replace bearer authentication. Modern HTTP requests require matching protocol and method headers, plus a matching tool-name header for tool calls. The SDK rejects inconsistent values before dispatch.
+
+## Proxy attachment and reachability
+
+`capture start` and `capture stop` attach or detach Fiddler as the host Windows system proxy. Detachment leaves a running Fiddler proxy listener available to explicitly routed traffic. Local clients can use loopback. Remote clients require Fiddler configured for remote access on a reachable interface or all interfaces, with routing and firewall rules that allow the connection. IPv4 `0.0.0.0` is an all-interface bind address. Clients use a concrete loopback or host address and the proxy port.
+
+Fiddler proxy access is configured separately from MCP HTTP binding and authentication. Capture commands preserve certificate trust and HTTPS-decryption settings. The CLI does not add network routes or firewall rules. Stopping system-proxy capture does not block clients that explicitly use the Fiddler listener.
 
 ## Traffic mutation
 
@@ -39,7 +47,7 @@ This project does not install, generate, or trust certificates. HTTPS decryption
 
 ## Destructive operations
 
-`app close` and `app restart` require confirmation because normal Fiddler shutdown stops active capture and can discard unsaved sessions. Save needed evidence first. The CLI does not save captures, force-kill processes, or dismiss native dialogs. It targets only verified processes owned by the current user in the current Windows session. Explicit opens and restarts use `-noattach`; restart does not restore captures or the previous capture state. A timed-out or cancelled close can still complete later, so check `app detect` before retrying.
+`app close` and `app restart` require confirmation because normal Fiddler shutdown stops active capture and can discard unsaved sessions. Save needed evidence first. The CLI does not save captures, force-kill processes, or dismiss native dialogs. It targets only verified processes owned by the current user in the current Windows session. Explicit opens and restarts use `-noattach`. Restart does not restore captures or the previous capture state. A timed-out or cancelled close can still complete later, so check `app detect` before retrying.
 
 Clearing sessions or rules, deleting a rule, replacing SAZ/FARX files or the complete rule list, and aborting a paused session require explicit confirmation. Managed HTTP also requires confirmation to enable remote access, revoke credentials, disconnect a connection, or disable the service while clients are connected. CLI automation must pass `--yes` where applicable. MCP callers must pass the corresponding confirmation argument.
 

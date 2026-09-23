@@ -18,12 +18,13 @@ Each public feature is classified by the source of its behavior. The type descri
 
 | Feature | CLI or MCP surface | Type | Compatibility behavior |
 | --- | --- | --- | --- |
+| CLI help and parser errors | Bare `fiddler-classic-cli`, command groups, `--help` | Host | Help writes to stdout and exits 0. Parser errors write help and errors to stderr and exit 2 without actions. With `--json`, stderr contains only the structured error. |
 | Offline and live status | `status`, `get_status` | Hybrid | The host discovers installations and processes. Proxy, listener, HTTPS decryption, version, and session counts come from the live Fiddler instance. |
-| System proxy capture | `capture start\|stop`, `start_capture`, `stop_capture` | Native | Calls Fiddler's attach or detach command and returns the resulting native proxy state. It does not change certificate trust. |
+| Host Windows system proxy capture | `capture start\|stop`, `start_capture`, `stop_capture` | Native | Attaches or detaches Fiddler as the host Windows system proxy and returns native proxy state. Explicitly routed traffic can still reach its running listener after detachment. Certificate trust and HTTPS decryption remain unchanged. |
 | Session snapshot and details | `sessions list\|show`, `list_network_requests`, `get_network_request` | Native adapter | Reads Fiddler's current session list and preserves native IDs, states, metadata, and exact header order. |
 | Session query filters and pagination | List filters and MCP continuation bounds | Custom | Filters a snapshot without changing Fiddler's Filters tab, visibility rules, or retained sessions. Matching and ID-bound pagination follow this project's documented semantics. |
 | Session waiting and watching | `sessions watch`, `wait_for_network_request` | Custom | Observes Fiddler completion events and returns the first completed match whose session ID exceeds the specified bound. It does not create a Fiddler UI filter. |
-| Request and response body access | `sessions body`, `get_network_request_body` | Native adapter | Copies exact bytes from the native `Session` body arrays. Chunking, offsets, and text/base64 metadata apply only to transport; they do not decode or normalize payload bytes. |
+| Request and response body access | `sessions body`, `get_network_request_body` | Native adapter | Copies exact bytes from the native `Session` body arrays. Chunking, offsets, and text/base64 metadata apply only to transport. They do not decode or normalize payload bytes. |
 | Session clearing and removal | `sessions clear\|remove`, `clear_network_requests`, `remove_network_requests` | Native | Invokes Fiddler session-list removal commands. Reported counts reflect the sessions Fiddler actually removed. |
 | SAZ archives | `sessions save\|load`, `save_network_archive`, `load_network_archive` | Native | Uses Fiddler's SAZ reader and writer. Path validation and overwrite confirmation are bridge safety controls. |
 | Request replay | `sessions replay`, `replay_network_request` | Native | Uses Fiddler's reissue operation, including its native unconditional-replay option. Optional result correlation is custom host orchestration. |
@@ -31,20 +32,25 @@ Each public feature is classified by the source of its behavior. The type descri
 | cURL, raw HTTP, and HAR export | `sessions export` | Hybrid | Reads exact native session evidence through the bridge, then serializes the selected format in the host. These are not Fiddler transcoder plug-ins. |
 | Session diff | `sessions diff`, `diff_network_requests` | Custom | Compares metadata, ordered headers, duration, and exact body hashes. It does not invoke Fiddler's visual Compare command or an external diff application. |
 | WebSocket inspection | `sessions websocket`, `list_websocket_messages`, `get_websocket_message` | Native adapter | Reads Fiddler's native WebSocket frame collection and exact payload bytes. Pagination and bounded payload chunks are custom transport behavior. |
-| AutoResponder settings and execution | `autoresponder status\|configure`, corresponding MCP tools | Native | Reads and changes Fiddler's live AutoResponder engine. Fiddler interprets match and action strings; the bridge does not implement a second rule engine. |
+| AutoResponder settings and execution | `autoresponder status\|configure`, corresponding MCP tools | Native | Reads and changes Fiddler's live AutoResponder engine. Fiddler interprets match and action strings. The bridge does not implement a second rule engine. |
 | AutoResponder rule management | Rule list, add, update, move, remove, and clear tools | Native adapter | Uses live Fiddler rule objects. Priority changes call Fiddler's native promote/demote operations, leaving evaluation order and grouping behavior under Fiddler's control. Runtime IDs are handles used only by the bridge. |
 | FARX persistence | AutoResponder rule `save` and `load` tools | Native | Uses Fiddler's native FARX save, import, and replacement operations. The bridge adds path validation, rollback, limits, and confirmations. |
 | Native breakpoint handling | Breakpoint show, update, resume, and abort tools | Native adapter | Uses Fiddler's request/response hand-tamper states, native session headers and bodies, `ThreadResume`, and native abort behavior. Manual Fiddler breakpoints remain discoverable. |
 | Breakpoint arms and waits | Breakpoint arm, disarm, list, wait, and hold timeout tools | Custom | Adds bounded filters, opaque IDs, sequence cursors, one-shot behavior, and automatic resume. A match activates the native breakpoint by setting Fiddler's documented breakpoint flag. |
-| Diagnostics and installation | `doctor`, `bridge install\|uninstall` | Host | Discovers files, processes, versions, pipes, and configuration. It copies bridge assemblies and maintains the current-user host launch record. Only the connectivity probe accesses the live bridge. |
-| Fiddler application lifecycle | `app detect\|open\|close\|restart` (CLI only) | Host | Finds executables and current-user, current-session processes through Windows APIs. Explicit launches use `-noattach`; confirmed close and restart request normal window shutdown without forced termination or automatic capture saving. |
-| Daemon and MCP transports | `daemon`, `mcp stdio\|http` | Host | Implements local IPC and JSON-RPC transports outside Fiddler. The C# SDK 2.2.0 supports MCP `2026-07-28` and legacy initialization; see [protocol compatibility](cli.md#mcp-protocol). The daemon can manage the HTTP listener configured in saved settings; the foreground server binds only to loopback. Both reject Origin-bearing requests. |
+| CLI installation | `scripts/install.ps1`, `scripts/install-local.ps1` | Host | Installs a published executable at a fixed current-user path, updates PATH, and deploys its embedded bridge by default. The shared installer downloads the release EXE and verifies GitHub's required SHA-256 asset digest, or accepts an explicit local source. The development script selects the checkout's existing publish output without downloading. Neither starts Fiddler, the daemon, or MCP servers or installs Agent Skills. |
+| Diagnostics and bridge maintenance | `doctor`, `bridge install\|uninstall` | Host | Discovers files, processes, versions, pipes, and configuration. It copies bridge assemblies and maintains the current-user host launch record. Only the connectivity probe accesses the live bridge. |
+| Fiddler application lifecycle | `app detect\|open\|close\|restart` (CLI only) | Host | Finds executables and current-user, current-session processes through Windows APIs. Explicit launches use `-noattach`. Confirmed close and restart request normal window shutdown without forced termination or automatic capture saving. |
+| Daemon and MCP transports | `daemon`, `mcp stdio\|http` | Host | Implements local IPC and JSON-RPC transports outside Fiddler. The C# SDK 2.2.0 supports MCP `2026-07-28` and legacy initialization. See [protocol compatibility](cli.md#mcp-protocol). The daemon can manage the HTTP listener configured in saved settings. The foreground server binds only to loopback. Both reject Origin-bearing requests. |
 | Managed HTTP access | `mcp service`, `mcp clients`, `mcp connections`, `config token` | Host | Implements listener configuration, mandatory bearer authentication, named credential hashes, and active transport control outside Fiddler. It does not change the capture proxy. |
-| Fiddler management UI | **Fiddler Classic CLI** tab and Tools menu entry | Hybrid | The extension displays controls and version information in Fiddler. The daemon manages persistent HTTP state, credentials, and connections. |
+| Fiddler management UI | **Fiddler Classic CLI** tab and Tools menu entry | Hybrid | The extension displays controls, versions, and read-only named-pipe diagnostics. Pipe refresh reads bridge listener state and daemon status without starting the daemon or configuring listeners. The daemon manages persistent HTTP state, credentials, and connections. |
 | Bounded session summaries | `sessions list --summary`, `summarize_network_requests` | Hybrid | Aggregates one bounded native metadata page in the host. Counts by host and status, captured body-byte totals, and timings for completed requests cover only the returned records. It does not read headers or bodies. |
 | Metadata-only diagnostic files | `doctor --output` | Hybrid | Creates a report from allowlisted local, bridge, and daemon status fields without starting a daemon. The report excludes traffic, credentials, identities, local paths, and raw errors. |
 
 ## Native parity rules
+
+### Proxy attachment
+
+Capture attachment changes the system proxy on the Windows host running Fiddler. Explicitly routed traffic can reach a running Fiddler listener in either attachment state, through loopback or an interface configured for remote access. An IPv4 `0.0.0.0` binding listens on all IPv4 interfaces. Clients use a concrete host address and proxy port, subject to network routing and firewall rules. Fiddler's proxy settings and MCP HTTP binding are independent.
 
 ### Captured evidence
 
@@ -62,11 +68,11 @@ Opaque rule IDs are valid only for the currently loaded rule objects. Loading or
 
 The bridge activates request and response pauses with Fiddler's `x-breakrequest` and `x-breakresponse` flags and observes the native hand-tamper state transitions. It applies mutations to the paused native `Session` and delegates resume or abort operations to Fiddler.
 
-Arms, filter matching, sequence cursors, and automatic hold timeouts are custom safety and automation features. They determine when to activate a native pause but do not replace Fiddler's breakpoint mechanism.
+Arms, filter matching, sequence cursors, and automatic hold timeouts are custom safety and automation features. They determine when to activate a pause through Fiddler's native breakpoint mechanism.
 
 ### Replay and composition
 
-The bridge delegates replay to Fiddler's reissue command. To send a request, it validates and constructs the raw request, then calls `FiddlerObject.utilIssueRequest`. The optional `--wait` behavior correlates a later session by baseline ID, method, and URL; this correlation is not a transaction handle supplied by Fiddler.
+The bridge delegates replay to Fiddler's reissue command. To send a request, it validates and constructs the raw request, then calls `FiddlerObject.utilIssueRequest`. The optional `--wait` behavior correlates a later session by baseline ID, method, and URL. Fiddler supplies no transaction handle for this correlation.
 
 ## Verification
 
@@ -79,4 +85,4 @@ Automated tests verify protocol framing, exact body chunking, filter semantics, 
 | `FIDDLER_CLASSIC_DESTRUCTIVE_INTEGRATION=1` | Native session clearing and SAZ restoration |
 | `FIDDLER_CLASSIC_PROXY_INTEGRATION=1` | Native proxy attach/detach with original-state restoration |
 
-The bridge supports Fiddler Classic 5.x and 6.x. The normal build uses reference `6.0.20261.7291`. CI requires metadata-only direct API resolution against `5.0.20253.3311` and `6.0.20261.7291` to pass before release, using SHA-256 to identify the same shipped DLL. An explicitly enabled native run also tests tab/menu registration, startup without tab selection, synthetic session evidence, and unload cleanup. See [CI verification](installation.md#github-actions). Passing metadata checks or unit tests does not establish that the native matrix has run.
+The bridge supports Fiddler Classic 5.x and 6.x. The normal build uses reference `6.0.20261.7291`. CI requires metadata-only direct API resolution against `5.0.20253.3311` and `6.0.20261.7291` to pass before release. Both jobs extract the bridge from the same verified release EXE and check its SHA-256. An explicitly enabled native run also tests tab/menu registration, startup without tab selection, synthetic session evidence, and unload cleanup. See [CI verification](installation.md#github-actions). Passing metadata checks or unit tests does not establish that the native matrix has run.

@@ -33,6 +33,7 @@ jobs:
     timeout-minutes: 30
     outputs:
       bridge-sha256: ${{ steps.bridge-hash.outputs.sha256 }}
+      executable-sha256: ${{ steps.executable-hash.outputs.sha256 }}
 
     steps:
       - name: Check out source
@@ -63,9 +64,13 @@ jobs:
               ./scripts/package.ps1
           }
 
-      - name: Exercise archive rejection rules
+      - name: Exercise single-file release rejection rules
         shell: pwsh
         run: ./scripts/test-release-verifier.ps1
+
+      - name: Test standalone execution and isolated PowerShell installation
+        shell: pwsh
+        run: ./scripts/test-single-file.ps1
 
       - name: Test release publication without GitHub writes
         shell: pwsh
@@ -75,26 +80,33 @@ jobs:
         shell: pwsh
         run: ./scripts/test-release-install.ps1
 
+      - name: Record the tested executable digest and extract test-only assets
+        id: executable-hash
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash artifacts/release/fiddler-classic-cli.exe -Algorithm SHA256).Hash
+          "sha256=$hash" >> $env:GITHUB_OUTPUT
+          ./scripts/expand-test-payload.ps1 -Executable artifacts/release/fiddler-classic-cli.exe `
+            -Destination artifacts/compatibility-payload -ExpectedSha256 $hash
+
       - name: Compile the native compatibility probe without running Fiddler
         shell: pwsh
         run: |
-          dotnet build ./tests/FiddlerClassic.CompatibilityProbe/FiddlerClassic.CompatibilityProbe.csproj --configuration Release
+          dotnet build ./tests/FiddlerClassicCLI.CompatibilityProbe/FiddlerClassicCLI.CompatibilityProbe.csproj --configuration Release
           if ($LASTEXITCODE -ne 0) { throw "Compatibility probe compilation failed." }
 
       - name: Record the single shipped bridge digest
         id: bridge-hash
         shell: pwsh
         run: |
-          $hash = (Get-FileHash artifacts/publish/win-x64/bridge/FiddlerClassic.Bridge.dll -Algorithm SHA256).Hash
+          $hash = (Get-FileHash artifacts/compatibility-payload/bridge/FiddlerClassicCLI.Bridge.dll -Algorithm SHA256).Hash
           "sha256=$hash" >> $env:GITHUB_OUTPUT
 
-      - name: Upload release package
+      - name: Upload release executable
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: fiddler-classic-release
-          path: |
-            artifacts/release/fiddler-classic-win-x64.zip
-            artifacts/release/SHA256SUMS
+          path: artifacts/release/fiddler-classic-cli.exe
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
@@ -107,7 +119,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Exact versions verified in microsoft/winget-pkgs, not floating major-version builds.
+        # Pin exact versions verified in microsoft/winget-pkgs.
         # manifests/t/Telerik/Fiddler/Classic/<version>/Telerik.Fiddler.Classic.installer.yaml
         fiddler-version: ['5.0.20253.3311', '6.0.20261.7291']
     steps:
@@ -121,7 +133,7 @@ jobs:
         with:
           global-json-file: global.json
 
-      - name: Download the same release ZIP in each job
+      - name: Download the same release executable in each job
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: fiddler-classic-release
@@ -138,9 +150,11 @@ jobs:
         env:
           COMPATIBILITY_FIDDLER_VERSION: ${{ matrix.fiddler-version }}
           RELEASED_BRIDGE_SHA256: ${{ needs.build.outputs.bridge-sha256 }}
+          RELEASED_EXECUTABLE_SHA256: ${{ needs.build.outputs.executable-sha256 }}
         run: |
           ./scripts/test-fiddler-api-compatibility.ps1 `
             -ExpectedFiddlerVersion $env:COMPATIBILITY_FIDDLER_VERSION `
+            -ExpectedExecutableSha256 $env:RELEASED_EXECUTABLE_SHA256 `
             -ExpectedBridgeSha256 $env:RELEASED_BRIDGE_SHA256
 
       - name: Run native lifecycle and synthetic evidence assertions
@@ -149,9 +163,11 @@ jobs:
         env:
           COMPATIBILITY_FIDDLER_VERSION: ${{ matrix.fiddler-version }}
           RELEASED_BRIDGE_SHA256: ${{ needs.build.outputs.bridge-sha256 }}
+          RELEASED_EXECUTABLE_SHA256: ${{ needs.build.outputs.executable-sha256 }}
         run: |
           ./scripts/test-fiddler-compatibility-ci.ps1 -EnableDisposableRunner `
             -ExpectedFiddlerVersion $env:COMPATIBILITY_FIDDLER_VERSION `
+            -ExpectedExecutableSha256 $env:RELEASED_EXECUTABLE_SHA256 `
             -ExpectedBridgeSha256 $env:RELEASED_BRIDGE_SHA256
       # Never upload installed native references, profile directories, traffic, or probe build output.
 
@@ -170,7 +186,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Download tested release package
+      - name: Download tested release executable
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: fiddler-classic-release
@@ -180,9 +196,11 @@ jobs:
         shell: pwsh
         run: ./scripts/test-release-publication.ps1
 
-      - name: Publish verified release assets
+      - name: Publish verified release executable
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASED_EXECUTABLE_SHA256: ${{ needs.build.outputs.executable-sha256 }}
         run: |
-          ./scripts/publish-release.ps1 -Tag $env:GITHUB_REF_NAME -Repository $env:GITHUB_REPOSITORY
+          ./scripts/publish-release.ps1 -Tag $env:GITHUB_REF_NAME -Repository $env:GITHUB_REPOSITORY `
+            -ExpectedSha256 $env:RELEASED_EXECUTABLE_SHA256

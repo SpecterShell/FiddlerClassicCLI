@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>fiddler-classic-cli</AssemblyName>
+    <RootNamespace>FiddlerClassicCLI.Host</RootNamespace>
+    <Version>0.3.0-preview.1</Version>
+    <PublishSingleFile Condition="'$(PublishSingleFile)' == ''">false</PublishSingleFile>
+    <!-- The CLI uses Kestrel directly and has no IIS deployment or static web assets. -->
+    <IsTransformWebConfigDisabled>true</IsTransformWebConfigDisabled>
+    <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../FiddlerClassicCLI.Protocol/FiddlerClassicCLI.Protocol.csproj" />
+    <!-- Let the bridge select its own framework so solution builds share one project instance. -->
+    <ProjectReference Include="../FiddlerClassicCLI.Bridge/FiddlerClassicCLI.Bridge.csproj"
+                      ReferenceOutputAssembly="false" PrivateAssets="all"
+                      SkipGetTargetFrameworkProperties="true"
+                      GlobalPropertiesToRemove="TargetFramework;RuntimeIdentifier;SelfContained;PublishSingleFile;PublishTrimmed;PublishProfile" />
+    <PackageReference Include="System.CommandLine" />
+    <PackageReference Include="ModelContextProtocol" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
+  </ItemGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="FiddlerClassicCLI.SingleFile" Value="$(PublishSingleFile)" />
+    <EmbeddedResource Include="../../LICENSE" LogicalName="FiddlerClassicCLI.Distribution.LICENSE" />
+    <EmbeddedResource Include="../FiddlerClassicCLI.Bridge/bin/$(Configuration)/net462/FiddlerClassicCLI.Bridge.dll"
+                      LogicalName="FiddlerClassicCLI.Distribution.FiddlerClassicCLI.Bridge.dll" />
+    <EmbeddedResource Include="../FiddlerClassicCLI.Bridge/bin/$(Configuration)/net462/FiddlerClassicCLI.Protocol.dll"
+                      LogicalName="FiddlerClassicCLI.Distribution.FiddlerClassicCLI.Protocol.dll" />
+  </ItemGroup>
+</Project>

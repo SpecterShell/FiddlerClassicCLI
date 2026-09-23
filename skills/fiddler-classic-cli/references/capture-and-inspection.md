@@ -2,21 +2,23 @@
 
 Use the narrowest command that answers the question. Read summaries before headers, and read bodies only when needed.
 
+Capture attachment controls the system proxy on the Windows host running Fiddler. Explicitly routed traffic can still reach its running proxy listener while detached. Local clients can use loopback. Remote clients require Fiddler configured for remote access on a reachable interface or all interfaces, with routing and firewall access. IPv4 `0.0.0.0` is an all-interface bind address. Clients use a concrete loopback or host address and the proxy port. Do not change remote-access or firewall settings without authorization.
+
 ## `capture start`
 
-Attach Fiddler as the Windows system proxy when the user requests capture. Usage: `& $cliPath capture start [--json]`. It does not change certificate trust or HTTPS decryption settings. Example: `& $cliPath capture start --json`.
+Attach Fiddler as the host Windows system proxy when the user requests system-proxy capture. Usage: `& $cliPath capture start [--json]`. It does not change certificate trust or HTTPS decryption settings. Example: `& $cliPath capture start --json`.
 
 ## `capture stop`
 
-Detach Fiddler from the Windows system proxy when the user asks to stop capture. Usage: `& $cliPath capture stop [--json]`. It preserves certificate and HTTPS settings. Example: `& $cliPath capture stop --json`.
+Detach Fiddler from the host Windows system proxy when the user asks to stop system-proxy capture. Usage: `& $cliPath capture stop [--json]`. Explicitly routed traffic can still reach the running proxy listener. The command preserves certificate trust and HTTPS-decryption settings. Example: `& $cliPath capture stop --json`.
 
 ## `sessions list`
 
-Find captured sessions or summarize a bounded page of results. Usage: `& $cliPath sessions list [filters] [--limit 1..1000] [--oldest-first] [--summary] [--json]`. Lists accept metadata, header, and bounded body-prefix filters. `--summary` accepts metadata filters only and reports host/status counts, captured body-byte totals, completed timings, and truncation; totals cover returned records only. Example: `& $cliPath sessions list --host example.test --limit 20 --summary --json`.
+Find captured sessions or summarize a bounded page of results. Usage: `& $cliPath sessions list [filters] [--limit 1..1000] [--oldest-first] [--summary] [--json]`. Lists accept metadata, header, and bounded body-prefix filters. `--summary` accepts metadata filters only and reports host/status counts, captured body-byte totals, completed timings, and truncation. Totals cover returned records only. Example: `& $cliPath sessions list --host example.test --limit 20 --summary --json`.
 
 ## `sessions watch`
 
-Wait for newly completed sessions that match the supplied filters. Usage: `& $cliPath sessions watch [filters] [--after-id ID] [--timeout 1..60] [--count N] [--jsonl]`. Without `--after-id`, watching starts after the current newest session; the timeout is an inactivity timeout. Example: `& $cliPath sessions watch --host example.test --count 1 --timeout 30 --jsonl`.
+Wait for newly completed sessions that match the supplied filters. Usage: `& $cliPath sessions watch [filters] [--after-id ID] [--timeout 1..60] [--count N] [--jsonl]`. Without `--after-id`, watching starts after the current newest session. The timeout is an inactivity timeout. Example: `& $cliPath sessions watch --host example.test --count 1 --timeout 30 --jsonl`.
 
 ## `sessions show`
 
@@ -24,7 +26,7 @@ Inspect one session's metadata and exact ordered headers without reading its bod
 
 ## `sessions body`
 
-Stream a complete raw request or response body. Usage: `& $cliPath sessions body <session-id> --direction request|response --output <path|->`. The command preserves exact bytes; `--output -` reserves stdout for those bytes. Example: `& $cliPath sessions body 42 --direction response --output "C:/Temp/response.bin"`.
+Stream a complete raw request or response body. Usage: `& $cliPath sessions body <session-id> --direction request|response --output <path|->`. The command preserves exact bytes. `--output -` reserves stdout for those bytes. Example: `& $cliPath sessions body 42 --direction response --output "C:/Temp/response.bin"`.
 
 ## `sessions diff`
 
@@ -36,4 +38,4 @@ List WebSocket frame metadata before reading payloads. Usage: `& $cliPath sessio
 
 ## `sessions websocket <session-id> get`
 
-Stream one complete WebSocket frame payload. Usage: `& $cliPath sessions websocket <session-id> get <message-id> [--offset N] --output <path|->`. Use the message ID returned by `list`; `--offset` resumes at a payload byte offset. Example: `& $cliPath sessions websocket 42 get 7 --output "C:/Temp/frame.bin"`.
+Stream one complete WebSocket frame payload. Usage: `& $cliPath sessions websocket <session-id> get <message-id> [--offset N] --output <path|->`. Use the message ID returned by `list`. `--offset` resumes at a payload byte offset. Example: `& $cliPath sessions websocket 42 get 7 --output "C:/Temp/frame.bin"`.

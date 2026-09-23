@@ -1,6 +1,6 @@
 # AutoResponder commands
 
-Rules use native Fiddler match expressions and action strings. List the rules before changing them; their evaluation order affects behavior.
+Rules use native Fiddler match expressions and action strings. List the rules before changing them because their evaluation order affects behavior.
 
 ## `autoresponder status`
 
@@ -32,7 +32,7 @@ Remove one rule by its runtime ID. Usage: `& $cliPath autoresponder rules remove
 
 ## `autoresponder rules clear`
 
-Remove every AutoResponder rule, but only when the user requests it. Usage: `& $cliPath autoresponder rules clear [--yes] [--json]`. Save a FARX backup first if the user wants to retain the rules. Example: `& $cliPath autoresponder rules clear --yes --json`.
+Remove every AutoResponder rule only when the user requests it. Usage: `& $cliPath autoresponder rules clear [--yes] [--json]`. Save a FARX backup first if the user wants to retain the rules. Example: `& $cliPath autoresponder rules clear --yes --json`.
 
 ## `autoresponder rules save`
 
@@ -40,4 +40,4 @@ Save all loaded rules to an absolute FARX path. Usage: `& $cliPath autoresponder
 
 ## `autoresponder rules load`
 
-Import rules from a FARX file or replace the current rule list. Usage: `& $cliPath autoresponder rules load <absolute.farx> [--replace] [--yes] [--json]`. Import adds to the current rules; `--replace` is destructive and requires confirmation. Example: `& $cliPath autoresponder rules load "C:/Captures/rules.farx" --json`.
+Import rules from a FARX file or replace the current rule list. Usage: `& $cliPath autoresponder rules load <absolute.farx> [--replace] [--yes] [--json]`. Import adds to the current rules. `--replace` is destructive and requires confirmation. Example: `& $cliPath autoresponder rules load "C:/Captures/rules.farx" --json`.

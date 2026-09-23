@@ -85,7 +85,7 @@ if (-not $installedBy) {
     }
 
     if (-not (Test-FiddlerInstallation)) {
-        throw "Chocolatey completed but did not install Fiddler Classic $Version at '$fiddlerPath'."
+        throw "Fiddler Classic $Version was not found at '$fiddlerPath' after Chocolatey completed."
     }
 
     $installedBy = "Chocolatey"
